@@ -264,6 +264,10 @@
     document.getElementById('chkShading').addEventListener('change', (e) => {
       engine.showShading = e.target.checked;
     });
+    document.getElementById('chkSmoothDisplay').addEventListener('change', (e) => {
+      engine.smoothDisplay = e.target.checked;
+      stageCanvas.style.imageRendering = e.target.checked ? 'auto' : 'pixelated';
+    });
     document.getElementById('chkPedestal').addEventListener('change', (e) => {
       engine.showPedestal = e.target.checked;
     });
@@ -306,7 +310,7 @@
       (ev) => {
         ev.preventDefault();
         const delta = ev.deltaY > 0 ? -0.3 : 0.3;
-        engine.zoom = Math.max(2.0, Math.min(10.0, +(engine.zoom + delta).toFixed(2)));
+        engine.zoom = Math.max(1.5, Math.min(10.0, +(engine.zoom + delta).toFixed(2)));
         rngZoom.value = engine.zoom;
         valZoom.textContent = `${engine.zoom.toFixed(1)}×`;
       },
@@ -472,22 +476,37 @@
     const valImgColors = document.getElementById('valImgColors');
     const rngImgDepth = document.getElementById('rngImgDepth');
     const valImgDepth = document.getElementById('valImgDepth');
+    const chkImgSmartBack = document.getElementById('chkImgSmartBack');
     const chkImgRemoveBg = document.getElementById('chkImgRemoveBg');
     const rngImgBgTol = document.getElementById('rngImgBgTol');
     const valImgBgTol = document.getElementById('valImgBgTol');
     const rowImgBgTol = document.getElementById('rowImgBgTol');
+    const btnResetWand = document.getElementById('btnResetWand');
 
     let loadedSourceImage = null;
-    let loadedSourceName = 'Mon Perso 3D';
+    let loadedSourceName = 'Mon Perso HD';
+    let lastPreviewRect = { dx: 0, dy: 0, dw: 96, dh: 96 };
     const img3dOpts = {
-      resolution: 38,
-      colors: 14,
-      depthScale: 12,
+      resolution: 76,
+      colors: 36,
+      depthScale: 16,
       mode: 'puffy',
       orientation: 'standing',
       removeBg: true,
       bgTolerance: 36,
+      smartBack: true,
+      extraEraseSeeds: [],
     };
+
+    function syncImg3dUI() {
+      rngImgRes.value = img3dOpts.resolution;
+      valImgRes.textContent = `${img3dOpts.resolution} px`;
+      rngImgColors.value = img3dOpts.colors;
+      valImgColors.textContent = `${img3dOpts.colors}`;
+      rngImgDepth.value = img3dOpts.depthScale;
+      valImgDepth.textContent = `${img3dOpts.depthScale}`;
+      btnResetWand.hidden = img3dOpts.extraEraseSeeds.length === 0;
+    }
 
     function rebuildFromSourceImage(resetCamera) {
       if (!loadedSourceImage) return;
@@ -505,12 +524,12 @@
       const dh = Math.round(pc.height * sc);
       const dx = Math.floor((img3dPreview.width - dw) * 0.5);
       const dy = Math.floor((img3dPreview.height - dh) * 0.5);
+      lastPreviewRect = { dx, dy, dw, dh };
       img3dPreviewCtx.drawImage(pc, dx, dy, dw, dh);
 
       // Update live 3D model on stage (preserve camera angle when tweaking sliders!)
       const prevYaw = engine.yaw;
       const prevPitch = engine.pitch;
-      const prevZoom = engine.zoom;
       const prevAnim = engine.animMode;
 
       currentModel = result.model;
@@ -518,8 +537,8 @@
       if (!resetCamera) {
         engine.yaw = prevYaw;
         engine.pitch = prevPitch;
-        engine.zoom = prevZoom;
         engine.animMode = prevAnim;
+        engine.zoom = currentModel.defaultZoom;
         engine.sliceCut = currentModel.height;
       }
       editor.setModel(currentModel);
@@ -527,6 +546,7 @@
       syncControlsFromEngine();
       syncLayerUI();
       renderPalette();
+      syncImg3dUI();
       document.querySelectorAll('.preset-card').forEach((c) => c.classList.remove('active'));
     }
 
@@ -535,7 +555,7 @@
         showToast('Dépose une image PNG, JPG ou WebP !');
         return;
       }
-      const cleanName = (file.name || 'Mon Perso 3D')
+      const cleanName = (file.name || 'Mon Perso HD')
         .replace(/\.[^.]+$/, '')
         .slice(0, 22);
       const url = URL.createObjectURL(file);
@@ -543,10 +563,11 @@
       img.onload = () => {
         URL.revokeObjectURL(url);
         loadedSourceImage = img;
-        loadedSourceName = cleanName || 'Mon Perso 3D';
+        loadedSourceName = cleanName || 'Mon Perso HD';
+        img3dOpts.extraEraseSeeds = [];
         img3dCard.hidden = false;
         rebuildFromSourceImage(true);
-        showToast(`✨ "${loadedSourceName}" transformé en Sprite-Stack 3D !`);
+        showToast(`✨ "${loadedSourceName}" converti en Sprite-Stack HD (${img3dOpts.resolution}px) !`);
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
@@ -554,6 +575,42 @@
       };
       img.src = url;
     }
+
+    // Magic Wand: click directly on any leftover background spot in the preview!
+    img3dPreview.addEventListener('click', (ev) => {
+      if (!loadedSourceImage) return;
+      const rect = img3dPreview.getBoundingClientRect();
+      const px = ((ev.clientX - rect.left) / rect.width) * img3dPreview.width;
+      const py = ((ev.clientY - rect.top) / rect.height) * img3dPreview.height;
+      const nx = (px - lastPreviewRect.dx) / Math.max(1, lastPreviewRect.dw);
+      const ny = (py - lastPreviewRect.dy) / Math.max(1, lastPreviewRect.dh);
+      if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return;
+      img3dOpts.extraEraseSeeds.push({ nx, ny });
+      rebuildFromSourceImage(false);
+      showToast('Zone de fond effacée (baguette magique)');
+    });
+
+    btnResetWand.addEventListener('click', () => {
+      img3dOpts.extraEraseSeeds = [];
+      rebuildFromSourceImage(false);
+      showToast('Détourage manuel réinitialisé');
+    });
+
+    // Quick Quality Presets (Rétro / Fin / HD / Ultra)
+    document.querySelectorAll('#img3dQualityList .chip').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        img3dOpts.resolution = parseInt(btn.dataset.res, 10);
+        img3dOpts.colors = parseInt(btn.dataset.col, 10);
+        document.querySelectorAll('#img3dQualityList .chip').forEach((b) => b.classList.toggle('active', b === btn));
+        syncImg3dUI();
+        rebuildFromSourceImage(false);
+      });
+    });
+
+    chkImgSmartBack.addEventListener('change', () => {
+      img3dOpts.smartBack = chkImgSmartBack.checked;
+      rebuildFromSourceImage(false);
+    });
 
     document.getElementById('btnImageTo3D').addEventListener('click', () => {
       if (loadedSourceImage && img3dCard.hidden) {

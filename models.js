@@ -123,77 +123,81 @@
   }
 
   /* =========================================================================
-     1. REQUIN PELUCHE SUSPENDU (Blåhaj Homage — Ryu's Tweet!)
+     1. REQUIN PELUCHE SUSPENDU HD (Blåhaj Homage — 92 × 60 × 84 couches!)
      ========================================================================= */
   function buildSharkModel() {
     const palette = [
       null,
-      { hex: '#6c98bc', group: 1 }, // 1: Blåhaj slate blue
-      { hex: '#8db7d8', group: 1 }, // 2: Light blue top highlight
-      { hex: '#4f7799', group: 1 }, // 3: Deep blue fin/shadow
-      { hex: '#eef4fa', group: 2 }, // 4: Plush white belly
-      { hex: '#d1deeb', group: 2 }, // 5: Belly shadow
-      { hex: '#f292a6', group: 3 }, // 6: Mouth pink
-      { hex: '#c85b74', group: 3 }, // 7: Deep mouth pink
-      { hex: '#ffffff', group: 4 }, // 8: Teeth & eye shine
-      { hex: '#1b2030', group: 4 }, // 9: Eyes
-      { hex: '#dc3244', group: 5 }, // 10: Red harness cord
-      { hex: '#a41c2c', group: 5 }, // 11: Dark red cord
-      { hex: '#c0824d', group: 6 }, // 12: Wooden peg
-      { hex: '#88532a', group: 6 }, // 13: Dark wood peg
+      { hex: '#6c9ac0', group: 1 }, // 1: Blåhaj slate blue
+      { hex: '#90bce0', group: 1 }, // 2: Soft back highlight
+      { hex: '#4d7699', group: 1 }, // 3: Deep fin / gill blue
+      { hex: '#f0f6fc', group: 2 }, // 4: Plush white belly
+      { hex: '#cfdde9', group: 2 }, // 5: Belly shadow
+      { hex: '#f495aa', group: 3 }, // 6: Mouth pink
+      { hex: '#c85874', group: 3 }, // 7: Deep throat pink
+      { hex: '#ffffff', group: 4 }, // 8: Crisp teeth & eye shine
+      { hex: '#181c2b', group: 4 }, // 9: Glossy eyes
+      { hex: '#df3346', group: 5 }, // 10: Vivid crimson rope
+      { hex: '#a61c2e', group: 5 }, // 11: Dark crimson rope shade
+      { hex: '#c68852', group: 6 }, // 12: Wooden peg
+      { hex: '#8b552b', group: 6 }, // 13: Dark wood grain
+      { hex: '#e2a973', group: 6 }, // 14: Wood top highlight
     ];
 
-    const W = 48;
-    const D = 32;
-    const H = 44;
+    const W = 92;
+    const D = 60;
+    const H = 84;
     const v = createVolume(W, D, H, palette);
-    const cy = 16;
+    const cy = 30;
 
-    // Cross-section profile of the Blåhaj plushie along X (x = 5..42)
+    // Smooth high-res Blåhaj cross-section profile along X (x = 9..80)
     function bodyProfile(x) {
-      if (x < 5 || x > 42) return null;
-      const t = (x - 5) / 37; // 0 = snout tip, 1 = tail base
+      if (x < 9 || x > 80) return null;
+      const t = (x - 9) / 71;
       let rxY, rxZ, centerZ;
-      if (t < 0.28) {
-        // Snout to head
-        const k = Math.pow(t / 0.28, 0.62);
-        rxY = 1.6 + k * 5.2;
-        rxZ = 1.4 + k * 4.5;
-        centerZ = 15.2 + Math.sin(t * Math.PI) * 1.2;
+      if (t < 0.27) {
+        const k = Math.pow(t / 0.27, 0.58);
+        rxY = 2.6 + k * 10.6;
+        rxZ = 2.2 + k * 9.2;
+        centerZ = 29.2 + Math.sin(t * Math.PI) * 2.2;
       } else if (t < 0.68) {
-        // Chubby torso
-        const k = (t - 0.28) / 0.40;
+        const k = (t - 0.27) / 0.41;
         const bulge = Math.sin(k * Math.PI);
-        rxY = 6.8 - k * 2.2 + bulge * 0.7;
-        rxZ = 5.9 - k * 1.9 + bulge * 0.6;
-        centerZ = 16.0 - k * 0.5;
+        rxY = 13.2 - k * 4.5 + bulge * 1.4;
+        rxZ = 11.4 - k * 3.8 + bulge * 1.1;
+        centerZ = 31.2 - k * 1.2;
       } else {
-        // Tapering tail stock curving slightly up
         const k = (t - 0.68) / 0.32;
-        rxY = Math.max(1.2, 4.6 * (1 - k * 0.72));
-        rxZ = Math.max(1.3, 4.0 * (1 - k * 0.66));
-        centerZ = 15.5 + k * 2.2;
+        rxY = Math.max(2.0, 8.7 * (1 - k * 0.74));
+        rxZ = Math.max(2.2, 7.6 * (1 - k * 0.68));
+        centerZ = 30.0 + k * 4.2;
       }
       return { rxY, rxZ, centerZ };
     }
 
-    // 1. Sculpt main plushie body
-    for (let x = 5; x <= 42; x++) {
+    // 1. Sculpt smooth rounded plush body
+    for (let x = 9; x <= 80; x++) {
       const p = bodyProfile(x);
       if (!p) continue;
-      for (let z = 6; z <= 27; z++) {
+      const z0 = Math.max(2, Math.floor(p.centerZ - p.rxZ - 1));
+      const z1 = Math.min(H - 1, Math.ceil(p.centerZ + p.rxZ + 1));
+      const y0 = Math.max(2, Math.floor(cy - p.rxY - 1));
+      const y1 = Math.min(D - 1, Math.ceil(cy + p.rxY + 1));
+
+      for (let z = z0; z <= z1; z++) {
         const dz = (z - p.centerZ) / p.rxZ;
-        for (let y = 4; y <= 28; y++) {
+        const dz2 = dz * dz;
+        for (let y = y0; y <= y1; y++) {
           const dy = (y - cy) / p.rxY;
-          const d = dy * dy + dz * dz;
+          const d = dy * dy + dz2;
           if (d <= 1.0) {
-            // Belly curve rises slightly near the snout
-            const bellySplit = p.centerZ - (x < 15 ? 0.5 : 0.7);
+            // Smooth two-tone Blåhaj split curving gently around snout & belly
+            const bellySplit = p.centerZ - (x < 28 ? 1.0 + (28 - x) * 0.04 : 1.5);
             let col;
             if (z < bellySplit) {
-              col = dz < -0.55 ? 5 : 4;
+              col = dz < -0.62 ? 5 : 4;
             } else {
-              col = dz > 0.65 && Math.abs(dy) < 0.55 ? 2 : 1;
+              col = dz > 0.68 && Math.abs(dy) < 0.52 ? 2 : 1;
             }
             v.set(x, y, z, col);
           }
@@ -201,153 +205,187 @@
       }
     }
 
-    // 2. Carve cute open mouth & pink interior + white triangular teeth
-    for (let x = 6; x <= 14; x++) {
-      const k = (x - 6) / 8;
-      const halfW = 1.5 + k * 3.1;
-      const zBot = Math.round(12.2 - k * 1.0);
-      const zTop = Math.round(14.8 - k * 0.4);
+    // 2. Carve expressive open pink mouth & individual triangular white teeth!
+    for (let x = 11; x <= 27; x++) {
+      const k = (x - 11) / 16;
+      const halfW = 2.5 + Math.pow(k, 0.85) * 6.4;
+      const zBot = Math.round(23.5 - k * 2.2);
+      const zTop = Math.round(28.5 - k * 1.1);
+
       for (let z = zBot; z <= zTop; z++) {
         for (let y = Math.floor(cy - halfW); y <= Math.ceil(cy + halfW); y++) {
-          if (x <= 12 && z > zBot && z < zTop && Math.abs(y - cy) < halfW - 0.8) {
-            // hollow inner mouth
-            v.set(x, y, z, 0);
-          } else if (z === zBot && x >= 7 && x <= 13) {
-            // pink lower tongue/mouth floor
-            v.set(x, y, z, x > 10 ? 7 : 6);
-          } else if (x >= 12 && z > zBot && z < zTop) {
-            // back of throat pink
+          const distSide = Math.abs(y - cy);
+          if (x <= 24 && z > zBot + 1 && z < zTop && distSide < halfW - 1.1) {
+            v.set(x, y, z, 0); // hollow open mouth interior
+          } else if (z <= zBot + 1 && x >= 12 && x <= 25 && distSide < halfW - 0.5) {
+            // Soft pink plush tongue/floor
+            v.set(x, y, z, x > 19 ? 7 : 6);
+          } else if (x >= 23 && z > zBot && z < zTop && distSide < halfW - 0.6) {
+            // Deep pink back of mouth
             v.set(x, y, z, 7);
           }
         }
       }
-      // Crisp white teeth along upper lip edge
-      if (x >= 7 && x <= 13 && x % 2 === 1) {
-        const lipY = Math.round(halfW - 0.3);
-        v.set(x, cy - lipY, zTop, 8);
-        v.set(x, cy + lipY, zTop, 8);
+
+      // Crisp individual white triangular teeth hanging from upper jaw lip!
+      if (x >= 12 && x <= 25 && (x % 3 === 0 || x % 3 === 1)) {
+        const lipY = Math.round(halfW - 0.5);
+        const toothLen = x % 3 === 0 ? 1 : 0;
+        for (let dt = 0; dt <= toothLen; dt++) {
+          v.set(x, cy - lipY, zTop - dt, 8);
+          v.set(x, cy + lipY, zTop - dt, 8);
+        }
+      }
+
+      // Clean white lower jaw rim
+      const jawY = Math.round(halfW - 0.2);
+      v.set(x, cy - jawY, zBot, 4);
+      v.set(x, cy + jawY, zBot, 4);
+      v.set(x, cy - jawY, zBot - 1, 4);
+      v.set(x, cy + jawY, zBot - 1, 4);
+    }
+    // Front tip teeth
+    v.set(12, cy - 2, 27, 8);
+    v.set(12, cy + 2, 27, 8);
+    v.set(11, cy, 27, 8);
+
+    // 3. Cute glossy round eyes on both sides of head
+    for (const side of [-1, 1]) {
+      const pEye = bodyProfile(23);
+      const ey = Math.round(cy + side * (pEye.rxY - 0.8));
+      v.ellipsoid(23, ey, 33.5, 2.1, 1.4, 2.1, 9);
+      // Bright white eye sparkle
+      v.set(22, ey + side * 1, 34, 8);
+      v.set(23, ey + side * 1, 35, 8);
+    }
+
+    // 4. Three subtle stitched gill slits on each side of neck (authentic Blåhaj detail!)
+    for (const side of [-1, 1]) {
+      for (const gx of [30, 33, 36]) {
+        const pG = bodyProfile(gx);
+        if (!pG) continue;
+        const gy = Math.round(cy + side * (pG.rxY - 0.1));
+        for (let gz = 27; gz <= 32; gz++) {
+          v.set(gx, gy, gz, 3);
+        }
       }
     }
-    // Front snout teeth
-    v.set(7, cy - 1, 14, 8);
-    v.set(7, cy + 1, 14, 8);
-    // Lower jaw lip white rim
-    for (let x = 7; x <= 13; x++) {
-      const w = 1.4 + ((x - 7) / 6) * 2.8;
-      v.set(x, cy - Math.round(w), 11, 4);
-      v.set(x, cy + Math.round(w), 11, 4);
-    }
 
-    // 3. Cute shiny eyes on both sides of head
-    for (const side of [-1, 1]) {
-      const ey = cy + side * 5;
-      v.set(12, ey, 17, 9);
-      v.set(13, ey, 17, 9);
-      v.set(12, ey, 18, 9);
-      v.set(13, ey, 18, 8); // bright eye glint
-    }
-
-    // 4. Dorsal Fin (sweeping gracefully backward)
-    for (let z = 20; z <= 29; z++) {
-      const k = (z - 20) / 9;
-      const xStart = Math.round(21 + k * 6.5);
-      const xEnd = Math.round(29 - k * 0.6);
-      const halfThick = k > 0.7 ? 0.6 : 1.1;
+    // 5. Sleek Curved Dorsal Fin
+    for (let z = 39; z <= 56; z++) {
+      const k = (z - 39) / 17;
+      const xStart = Math.round(40 + Math.pow(k, 1.15) * 13);
+      const xEnd = Math.round(56 - k * 1.4 + Math.sin(k * Math.PI) * 1.5);
+      const halfThick = Math.max(0.7, 2.2 * (1 - k * 0.65));
       for (let x = xStart; x <= xEnd; x++) {
         for (let y = Math.floor(cy - halfThick); y <= Math.ceil(cy + halfThick); y++) {
-          v.set(x, y, z, z > 26 ? 2 : 1);
+          v.set(x, y, z, z > 51 ? 2 : 1);
         }
       }
     }
 
-    // 5. Pectoral Fins (left & right swept back and slightly downward)
+    // 6. Gracefully Swept Pectoral Fins (left & right)
     for (const side of [-1, 1]) {
-      for (let i = 0; i <= 9; i++) {
-        const k = i / 9;
-        const fy = cy + side * (5 + i);
-        const fx0 = Math.round(18 + k * 7);
-        const fx1 = Math.round(24 + k * 4.5 - k * k * 2.5);
-        const fz = Math.round(13.5 - k * 3.8);
+      for (let i = 0; i <= 17; i++) {
+        const k = i / 17;
+        const fy = cy + side * (10 + i);
+        const fx0 = Math.round(35 + Math.pow(k, 1.1) * 13);
+        const fx1 = Math.round(47 + k * 7 - k * k * 5);
+        const fz = Math.round(25.5 - k * 7.2);
+        const thickZ = k < 0.5 ? 2 : 1;
         for (let x = fx0; x <= fx1; x++) {
-          v.set(x, fy, fz, 1);
-          v.set(x, fy, fz + 1, k < 0.5 ? 2 : 1);
-          if (k < 0.7) v.set(x, fy, fz - 1, 3);
+          for (let dz = -thickZ; dz <= thickZ; dz++) {
+            const col = dz > 0 ? (k < 0.45 ? 2 : 1) : dz < 0 ? 3 : 1;
+            v.set(x, fy, fz + dz, col);
+          }
         }
       }
     }
 
-    // 6. Forked Crescent Tail Fin (classic Blåhaj silhouette!)
-    for (let i = 0; i <= 8; i++) {
-      const k = i / 8;
-      // Upper tail lobe (taller)
-      const ux = Math.round(39 + i * 0.75);
-      const uz = Math.round(18 + i * 1.15);
-      for (let dx = -1; dx <= 1; dx++) {
-        v.set(ux + dx, cy, uz, 1);
-        v.set(ux + dx, cy - 1, uz, k < 0.6 ? 1 : 0);
-        v.set(ux + dx, cy + 1, uz, k < 0.6 ? 1 : 0);
+    // 7. Sharp Forked Crescent Tail Fin
+    for (let i = 0; i <= 16; i++) {
+      const k = i / 16;
+      const ux = Math.round(74 + i * 0.85);
+      const uz = Math.round(34 + i * 1.18);
+      const halfW = Math.round(2.8 * (1 - k * 0.65));
+      const halfT = k < 0.65 ? 1 : 0;
+      for (let dx = -halfW; dx <= halfW; dx++) {
+        for (let dy = -halfT; dy <= halfT; dy++) {
+          v.set(ux + dx, cy + dy, uz, k > 0.7 ? 2 : 1);
+        }
       }
-      // Lower tail lobe (shorter)
-      if (i <= 5) {
-        const lx = Math.round(40 + i * 0.7);
-        const lz = Math.round(16 - i * 0.95);
-        v.set(lx, cy, lz, 3);
-        v.set(lx + 1, cy, lz, 1);
+      if (i <= 10) {
+        const lk = i / 10;
+        const lx = Math.round(76 + i * 0.78);
+        const lz = Math.round(31 - i * 0.98);
+        const lw = Math.round(2.2 * (1 - lk * 0.65));
+        for (let dx = -lw; dx <= lw; dx++) {
+          v.set(lx + dx, cy, lz, lk > 0.5 ? 3 : 1);
+          if (lk < 0.5) {
+            v.set(lx + dx, cy - 1, lz, 1);
+            v.set(lx + dx, cy + 1, lz, 1);
+          }
+        }
       }
     }
 
-    // 7. Decorative Red Crisscross Harness Cords hugging the shark's torso!
-    function wrapRing(xCenter, slantX, col) {
-      for (let a = 0; a < 72; a++) {
-        const ang = (a / 72) * Math.PI * 2;
+    // 8. Crisp Continuous Crimson Crisscross Harness Cords hugging the exact surface!
+    function wrapRingHD(xCenter, slantX, col) {
+      for (let a = 0; a < 180; a++) {
+        const ang = (a / 180) * Math.PI * 2;
         const x = Math.round(xCenter + Math.sin(ang) * slantX);
         const p = bodyProfile(x);
         if (!p) continue;
-        const y = Math.round(cy + Math.cos(ang) * (p.rxY + 0.55));
-        const z = Math.round(p.centerZ + Math.sin(ang) * (p.rxZ + 0.55));
+        const y = Math.round(cy + Math.cos(ang) * (p.rxY + 0.85));
+        const z = Math.round(p.centerZ + Math.sin(ang) * (p.rxZ + 0.85));
         v.set(x, y, z, col);
+        v.set(x + 1, y, z, col);
+        v.set(x, y, z + 1, col);
       }
     }
 
-    // Three crisscross diamond bands around the plush body
-    wrapRing(18, 2.2, 10);
-    wrapRing(19, -2.2, 11);
-    wrapRing(25, 2.6, 10);
-    wrapRing(26, -2.6, 10);
-    wrapRing(32, 2.2, 11);
-    wrapRing(33, -2.0, 10);
+    wrapRingHD(34, 4.4, 10);
+    wrapRingHD(36, -4.4, 11);
+    wrapRingHD(48, 5.0, 10);
+    wrapRingHD(50, -5.0, 10);
+    wrapRingHD(62, 4.0, 11);
+    wrapRingHD(64, -3.8, 10);
 
     // Side longitudinal connecting cords
     for (const side of [-1, 1]) {
-      for (let x = 18; x <= 33; x++) {
+      for (let x = 34; x <= 64; x++) {
         const p = bodyProfile(x);
         if (!p) continue;
-        const y = Math.round(cy + side * (p.rxY + 0.55));
+        const y = Math.round(cy + side * (p.rxY + 0.9));
         const z = Math.round(p.centerZ);
         v.set(x, y, z, 10);
+        v.set(x, y, z + 1, 11);
       }
     }
 
-    // 8. Suspension Ropes converging from torso harness up to the top wooden peg!
-    const pegX = 24;
+    // 9. Taut Continuous Suspension Ropes converging neatly to the wooden peg at top
+    const pegX = 46;
     const pegY = cy;
-    const pegZ = 39;
-    v.line3D(18, cy - 5, 21, pegX, pegY, pegZ, 10);
-    v.line3D(18, cy + 5, 21, pegX, pegY, pegZ, 10);
-    v.line3D(31, cy - 4, 20, pegX, pegY, pegZ, 11);
-    v.line3D(31, cy + 4, 20, pegX, pegY, pegZ, 11);
-    // Knot right under peg
-    v.box(pegX - 1, pegY - 1, pegZ - 1, pegX + 1, pegY + 1, pegZ, 11);
+    const pegZ = 74;
+    v.line3D(35, cy - 10, 41, pegX, pegY, pegZ, 10, 0.95);
+    v.line3D(35, cy + 10, 41, pegX, pegY, pegZ, 10, 0.95);
+    v.line3D(61, cy - 8, 39, pegX, pegY, pegZ, 11, 0.95);
+    v.line3D(61, cy + 8, 39, pegX, pegY, pegZ, 11, 0.95);
 
-    // 9. Wooden Anchor Peg at top
-    v.cylinderZ(pegX, pegY, pegZ + 1, 43, 1.5, 12);
-    v.set(pegX - 1, pegY - 1, 42, 13);
-    v.set(pegX - 1, pegY - 1, 41, 13);
+    // Rope knot collar right under wooden peg
+    v.cylinderZ(pegX, pegY, pegZ - 2, pegZ + 1, 2.3, 11);
+    v.cylinderZ(pegX, pegY, pegZ - 1, pegZ, 2.6, 10);
+
+    // 10. Detailed Cylindrical Wooden Anchor Peg at top
+    v.cylinderZ(pegX, pegY, pegZ + 2, 82, 2.6, 12);
+    v.cylinderZ(pegX, pegY, 82, 82, 2.4, 14);
+    v.line3D(pegX - 2, pegY - 1, pegZ + 2, pegX - 2, pegY - 1, 81, 13);
+    v.line3D(pegX + 1, pegY + 2, pegZ + 3, pegX + 1, pegY + 2, 81, 13);
 
     return {
       id: 'shark',
-      name: 'Requin Peluche Suspendu',
-      subtitle: '44 couches · Hommage Blåhaj',
+      name: 'Requin Peluche HD',
+      subtitle: '84 couches HD · Hommage Blåhaj',
       icon: '🦈',
       width: W,
       depth: D,
@@ -356,9 +394,9 @@
       palette,
       defaultAnim: 'pendulum',
       defaultYaw: -0.42,
-      defaultPitch: 22,
-      defaultZoom: 5.5,
-      pivotZ: 41,
+      defaultPitch: 20,
+      defaultZoom: 2.9,
+      pivotZ: 78,
       particleTheme: 'sparkles',
     };
   }

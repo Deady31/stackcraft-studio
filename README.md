@@ -8,23 +8,25 @@
 
 ## ✨ Fonctionnalités
 
-- **Moteur Sprite Stacking pixel-perfect** (`engine.js`)
-  - Échantillonnage inverse *nearest-neighbor* sans trous ni flou à n'importe quel angle.
-  - **Contour pixel 1px** automatique, **lignes de relief interne** (détection de sauts de profondeur et frontières de matériaux) et **ombrage par hauteur**.
+- **Moteur Sprite Stacking HD pixel-perfect** (`engine.js`)
+  - Échantillonnage inverse *nearest-neighbor* sans trous ni flou jusqu'en **HD 112 px** à 120–300+ FPS.
+  - **Contour pixel 1px** fin, **lignes de relief interne**, **Cel-Shading 3D directionnel + Rim Light** et option **Lissage HD**.
   - **Vue éclatée (*Exploded View*)** et **coupe verticale** pour observer l'empilement couche par couche en direct.
   - **5 modes d'animation** : `Pendule`, `Toupie 360°`, `Lévitation`, `Rebond`, `Manuel`.
   - Décors (`Grille Claire`, `Studio Noir`, `Blueprint`), socle circulaire lumineux avec ombre dynamique et particules pixelisées (étincelles, pétales de sakura, runes).
 
-- **Convertisseur Image → 3D instantané** (`importer.js`)
+- **Convertisseur Image → 3D HD instantané** (`importer.js`)
   - **Glisser-déposer**, bouton **`Image → 3D`** ou simple **`Ctrl+V`** depuis le presse-papiers.
-  - **Détourage auto du fond**, quantification de palette pixel-art (K-Means) et **gonflage 3D organique** (Transformée de distance euclidienne) avec 4 styles : `Peluche 3D`, `Relief Lumière`, `Figurine Épaisse` et `Révolution 360°`.
-  - Orientation **Debout (Perso)** ou **À plat (Badge)** avec aperçu 3D en temps réel.
+  - Préréglages rapides **`Rétro (38px)` · `Fin (60px)` · `HD (76px)` · `Ultra (104–112px)`** avec quantification **Median-Cut** jusqu'à **96 couleurs**.
+  - **Dos intelligent** (plus de visage dupliqué derrière la tête quand ton personnage tourne à 360°).
+  - **Détourage auto du fond** + **baguette magique au clic** directement sur l'aperçu pour effacer les zones résiduelles.
+  - **Gonflage 3D organique** (4 styles : `Peluche 3D`, `Relief Lumière`, `Figurine Épaisse`, `Révolution 360°`) en orientation **Debout (Perso)** ou **À plat (Badge)**.
 
 - **Éditeur de couches 2D temps réel** (`editor.js`)
   - Pinceau (`1/2/3 px`), Gomme, Pot de peinture, Pipette, **Symétrie X/Y**, **Pelure d'oignon** (`Z-1` / `Z+1`), Copier couche `↑/↓`, Miroir X, palette extensible et Annuler/Rétablir (`Ctrl+Z` / `Ctrl+Y`).
 
 - **Modèles intégrés** (`models.js`)
-  - 🦈 **Requin Peluche Suspendu** (44 couches · hommage Blåhaj en pendule)
+  - 🦈 **Requin Peluche HD** (84 couches HD · hommage Blåhaj en pendule)
   - ⛩️ **Sanctuaire Torii Kyoto** (40 couches · lanterne, bassin & sakura)
   - 🚗 **Kei Drift Rétro** (20 couches · Panda AE86)
   - 🤖 **Neko-Bot Rétro** (38 couches · robot flottant)

@@ -52,24 +52,41 @@
   }
 
   function preparePaletteCache(model) {
-    const cache = new Array(model.palette.length);
+    const len = model.palette.length;
+    const palR = new Uint8Array(len);
+    const palG = new Uint8Array(len);
+    const palB = new Uint8Array(len);
+    const palGrp = new Uint8Array(len);
+    const palEm = new Uint8Array(len);
+    const cache = new Array(len);
     cache[0] = null;
-    for (let i = 1; i < model.palette.length; i++) {
+
+    for (let i = 1; i < len; i++) {
       const entry = model.palette[i];
       if (!entry) {
         cache[i] = null;
         continue;
       }
       const rgb = hexToRgb(entry.hex);
+      palR[i] = rgb.r;
+      palG[i] = rgb.g;
+      palB[i] = rgb.b;
+      palGrp[i] = entry.group != null ? entry.group & 255 : i & 255;
+      palEm[i] = entry.emissive ? 1 : 0;
       cache[i] = {
         r: rgb.r,
         g: rgb.g,
         b: rgb.b,
-        group: entry.group != null ? entry.group : i,
+        group: palGrp[i],
         emissive: Boolean(entry.emissive),
       };
     }
     model._palCache = cache;
+    model._palR = palR;
+    model._palG = palG;
+    model._palB = palB;
+    model._palGrp = palGrp;
+    model._palEm = palEm;
     return cache;
   }
 
@@ -78,24 +95,25 @@
       this.canvas = canvas;
       this.ctx = canvas.getContext('2d', { alpha: false });
 
-      // Offscreen crisp low-res pixel buffer
+      // Offscreen virtual pixel buffer (scales up cleanly for HD 96-112px models!)
       this.bufCanvas = document.createElement('canvas');
       this.bufCtx = this.bufCanvas.getContext('2d');
-      this.bufW = 200;
-      this.bufH = 200;
+      this.bufW = 240;
+      this.bufH = 240;
       this.imageData = null;
       this.u32 = null;
       this.zBuf = null;
       this.groupBuf = null;
       this.emissiveBuf = null;
+      this.depthBuf = null; // screen-facing depth for directional 3D cel-shading!
 
       // Camera & render settings
       this.model = null;
       this.yaw = -0.45;
-      this.pitch = 26; // degrees
-      this.zoom = 5.4;
+      this.pitch = 24;
+      this.zoom = 5.0;
       this.spread = 1.0;
-      this.sliceCut = 48;
+      this.sliceCut = 96;
 
       this.animMode = 'pendulum';
       this.playing = true;
@@ -109,15 +127,13 @@
       this.showShading = true;
       this.showPedestal = true;
       this.showParticles = true;
+      this.smoothDisplay = false; // Crisp pixel art by default; optional smooth HD scaling
 
-      // Highlighted slice (when editing in split mode)
       this.highlightSlice = -1;
 
-      // Procedural ambient particles
       this.particles = [];
       this._initParticles();
 
-      // FPS tracking
       this.fps = 60;
       this._frames = 0;
       this._fpsTime = performance.now();
@@ -127,13 +143,13 @@
 
     _initParticles() {
       this.particles = [];
-      for (let i = 0; i < 16; i++) {
+      for (let i = 0; i < 18; i++) {
         this.particles.push({
-          angle: (i / 16) * Math.PI * 2 + Math.random() * 0.4,
-          radius: 14 + Math.random() * 18,
-          heightFrac: 0.12 + Math.random() * 0.82,
+          angle: (i / 18) * Math.PI * 2 + Math.random() * 0.4,
+          radiusFrac: 0.46 + Math.random() * 0.36,
+          heightFrac: 0.14 + Math.random() * 0.80,
           phase: Math.random() * Math.PI * 2,
-          speed: 0.6 + Math.random() * 1.1,
+          speed: 0.6 + Math.random() * 1.05,
           size: i % 3 === 0 ? 2 : 1,
         });
       }
@@ -146,14 +162,20 @@
       if (applyDefaults) {
         this.animMode = model.defaultAnim || 'turntable';
         this.yaw = model.defaultYaw != null ? model.defaultYaw : -0.45;
-        this.pitch = model.defaultPitch != null ? model.defaultPitch : 26;
-        this.zoom = model.defaultZoom != null ? model.defaultZoom : 3.2;
+        this.pitch = model.defaultPitch != null ? model.defaultPitch : 24;
+        this.zoom = model.defaultZoom != null ? model.defaultZoom : this._autoZoomFor(model);
         this.spread = 1.0;
         this.sliceCut = model.height;
         this.time = 0;
       } else {
         this.sliceCut = Math.min(this.sliceCut, model.height);
       }
+      this._ensureBufferSize();
+    }
+
+    _autoZoomFor(model) {
+      const maxSpan = Math.max(model.width, model.depth, model.height);
+      return Math.max(2.2, Math.min(6.2, +(260 / Math.max(32, maxSpan)).toFixed(1)));
     }
 
     markModelDirty() {
@@ -178,14 +200,18 @@
     _getEffectiveScale() {
       const ref = Math.min(this.displayW || 800, this.displayH || 700);
       const viewportFactor = Math.max(0.85, Math.min(1.65, ref / 680));
-      return Math.max(2.0, this.zoom * viewportFactor);
+      return Math.max(1.5, this.zoom * viewportFactor);
     }
 
     _ensureBufferSize() {
-      // Virtual pixel buffer scaled inversely by effective pixel scale
       const scale = this._getEffectiveScale();
-      const targetW = Math.min(240, Math.max(110, Math.ceil(this.displayW / scale) + 10));
-      const targetH = Math.min(230, Math.max(110, Math.ceil(this.displayH / scale) + 10));
+      // Allow higher virtual resolution (up to 420x380) so HD 96-112px models never clip!
+      const minNeed = this.model
+        ? Math.ceil(Math.max(this.model.width, this.model.depth, this.model.height) * 1.65)
+        : 140;
+      const targetW = Math.min(420, Math.max(minNeed, Math.min(340, Math.ceil(this.displayW / scale) + 12)));
+      const targetH = Math.min(380, Math.max(minNeed, Math.min(320, Math.ceil(this.displayH / scale) + 12)));
+
       if (targetW !== this.bufW || targetH !== this.bufH || !this.imageData) {
         this.bufW = targetW;
         this.bufH = targetH;
@@ -197,6 +223,7 @@
         this.zBuf = new Int16Array(len);
         this.groupBuf = new Uint8Array(len);
         this.emissiveBuf = new Uint8Array(len);
+        this.depthBuf = new Int16Array(len);
       }
     }
 
@@ -217,6 +244,7 @@
       const t = this.time;
       const amp = this.amplitude;
       const mode = this.animMode;
+      const hScale = this.model ? this.model.height / 44 : 1;
 
       let yawOffset = 0;
       let floatY = 0;
@@ -225,21 +253,20 @@
       let waveAmp = 0;
 
       if (mode === 'pendulum') {
-        swingAngle = Math.sin(t * 2.15) * 0.145 * amp;
-        yawOffset = Math.sin(t * 2.15 - 0.55) * 0.52 * amp;
-        waveAmp = 0.35 * amp;
+        swingAngle = Math.sin(t * 2.15) * 0.14 * amp;
+        yawOffset = Math.sin(t * 2.15 - 0.55) * 0.48 * amp;
+        waveAmp = 0.3 * amp;
       } else if (mode === 'turntable') {
         yawOffset = t * 1.15 * amp;
-        floatY = Math.sin(t * 2.2) * 0.6 * amp;
+        floatY = Math.sin(t * 2.2) * 0.7 * hScale * amp;
       } else if (mode === 'hover') {
-        floatY = Math.sin(t * 2.7) * 3.4 * amp;
+        floatY = Math.sin(t * 2.7) * 3.4 * hScale * amp;
         yawOffset = Math.sin(t * 1.1) * 0.38 * amp;
-        waveAmp = 0.2 * amp;
+        waveAmp = 0.18 * amp;
       } else if (mode === 'bounce') {
-        const s = Math.sin(t * 3.5);
-        const hop = Math.abs(s);
-        floatY = hop * 6.0 * amp;
-        spreadMult = 1.0 + (hop - 0.45) * 0.14 * amp;
+        const hop = Math.abs(Math.sin(t * 3.5));
+        floatY = hop * 5.8 * hScale * amp;
+        spreadMult = 1.0 + (hop - 0.45) * 0.13 * amp;
         yawOffset = t * 0.75 * amp;
       }
 
@@ -258,7 +285,6 @@
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // 1. Draw Background Grid
       this._drawBackground(ctx, W, H);
 
       const anim = this._getAnimState();
@@ -266,20 +292,16 @@
       const squashY = Math.max(0.09, Math.sin(pitchRad));
       const baseLayerStep = Math.cos(pitchRad) * this.spread * anim.spreadMult;
 
-      // Center of stage in display coordinates
       const pixelScale = this._getEffectiveScale();
       const stageCx = W * 0.5;
       const stageCy = H * 0.56;
 
-      // 2. Draw Circular Turntable Pedestal + Dynamic Shadow underneath
       if (this.showPedestal) {
         this._drawPedestal(ctx, stageCx, stageCy, squashY, anim, pixelScale);
       }
 
-      // 3. Rasterize Sprite Stack into low-res pixel buffer
       this._rasterizeModel(anim, squashY, baseLayerStep);
 
-      // 4. Composite low-res pixel buffer crisply onto main canvas
       this.bufCtx.putImageData(this.imageData, 0, 0);
 
       const drawW = this.bufW * pixelScale;
@@ -287,7 +309,10 @@
       const drawX = Math.round(stageCx - drawW * 0.5);
       const drawY = Math.round(stageCy - drawH * 0.56);
 
-      ctx.imageSmoothingEnabled = false;
+      ctx.imageSmoothingEnabled = this.smoothDisplay;
+      if (this.smoothDisplay) {
+        ctx.imageSmoothingQuality = 'high';
+      }
       ctx.drawImage(this.bufCanvas, drawX, drawY, drawW, drawH);
 
       ctx.restore();
@@ -350,8 +375,14 @@
       }
       ctx.stroke();
 
-      // Subtle radial studio vignette
-      const grad = ctx.createRadialGradient(W * 0.5, H * 0.48, Math.min(W, H) * 0.18, W * 0.5, H * 0.5, Math.max(W, H) * 0.72);
+      const grad = ctx.createRadialGradient(
+        W * 0.5,
+        H * 0.48,
+        Math.min(W, H) * 0.18,
+        W * 0.5,
+        H * 0.5,
+        Math.max(W, H) * 0.72
+      );
       grad.addColorStop(0, 'rgba(0,0,0,0)');
       grad.addColorStop(1, vignette);
       ctx.fillStyle = grad;
@@ -361,20 +392,18 @@
     _drawPedestal(ctx, cx, cy, squashY, anim, pixelScale) {
       const m = this.model;
       const baseRadius = Math.max(m.width, m.depth) * 0.54 * pixelScale;
-      const rx = Math.max(54, baseRadius);
+      const rx = Math.max(58, baseRadius);
       const ry = Math.max(16, rx * squashY);
       const totalStackPx = m.height * Math.cos((this.pitch * Math.PI) / 180) * this.spread;
       const py = cy + totalStackPx * 0.30 * pixelScale + 4 * pixelScale * 0.25;
 
       ctx.save();
 
-      // Soft outer floor shadow
       ctx.beginPath();
       ctx.ellipse(cx, py + 7, rx * 1.07, ry * 1.12, 0, 0, Math.PI * 2);
       ctx.fillStyle = this.bgMode === 'paper' ? 'rgba(30, 48, 78, 0.16)' : 'rgba(0, 0, 0, 0.45)';
       ctx.fill();
 
-      // Metallic rim thickness (3D lip)
       ctx.beginPath();
       ctx.ellipse(cx, py + 5, rx, ry, 0, 0, Math.PI * 2);
       ctx.fillStyle = '#26384f';
@@ -383,7 +412,6 @@
       ctx.strokeStyle = '#182233';
       ctx.stroke();
 
-      // Top metallic ring surface
       const ringGrad = ctx.createLinearGradient(cx - rx, py - ry, cx + rx, py + ry);
       ringGrad.addColorStop(0, '#6285a8');
       ringGrad.addColorStop(0.5, '#3b5675');
@@ -396,7 +424,6 @@
       ctx.strokeStyle = '#182233';
       ctx.stroke();
 
-      // Inner glowing cyan track
       ctx.beginPath();
       ctx.ellipse(cx, py, rx * 0.86, ry * 0.86, 0, 0, Math.PI * 2);
       ctx.fillStyle = this.bgMode === 'paper' ? '#cdd9e8' : '#182234';
@@ -405,7 +432,6 @@
       ctx.strokeStyle = '#67e8f9';
       ctx.stroke();
 
-      // Subtle inner tick marks rotating with yaw
       const totalYaw = this.yaw + anim.yawOffset;
       ctx.strokeStyle = 'rgba(103, 232, 249, 0.45)';
       ctx.lineWidth = 1.5;
@@ -421,14 +447,14 @@
         ctx.stroke();
       }
 
-      // Dynamic cast shadow of object inside the pedestal
-      const swingShiftX = Math.sin(anim.swingAngle) * 18 * pixelScale * 0.4;
-      const shadowScale = Math.max(0.45, 1.0 - anim.floatY * 0.035);
+      const swingShiftX = Math.sin(anim.swingAngle) * (m.height * 0.42) * pixelScale * 0.42;
+      const hNorm = anim.floatY / Math.max(1, m.height);
+      const shadowScale = Math.max(0.45, 1.0 - hNorm * 1.4);
       const srx = rx * 0.55 * shadowScale;
       const sry = ry * 0.48 * shadowScale;
       ctx.beginPath();
       ctx.ellipse(cx + swingShiftX, py + 1, srx, sry, 0, 0, Math.PI * 2);
-      ctx.fillStyle = this.bgMode === 'paper' ? 'rgba(25, 38, 60, 0.26)' : 'rgba(2, 6, 16, 0.55)';
+      ctx.fillStyle = this.bgMode === 'paper' ? 'rgba(25, 38, 60, 0.25)' : 'rgba(2, 6, 16, 0.55)';
       ctx.fill();
 
       ctx.restore();
@@ -437,19 +463,25 @@
     _rasterizeModel(anim, squashY, layerStep) {
       const m = this.model;
       const { width, depth, height, layers, layerBounds } = m;
-      const pal = m._palCache;
+      const palR = m._palR;
+      const palG = m._palG;
+      const palB = m._palB;
+      const palGrp = m._palGrp;
+      const palEm = m._palEm;
+
       const bufW = this.bufW;
       const bufH = this.bufH;
       const u32 = this.u32;
       const zBuf = this.zBuf;
       const groupBuf = this.groupBuf;
       const emissiveBuf = this.emissiveBuf;
+      const depthBuf = this.depthBuf;
 
-      // Clear buffers
       u32.fill(0);
       zBuf.fill(-1);
       groupBuf.fill(0);
       emissiveBuf.fill(0);
+      depthBuf.fill(-32000);
 
       const maxVisibleZ = Math.min(height, this.sliceCut);
       const halfW = width * 0.5;
@@ -457,7 +489,6 @@
       const totalYaw = this.yaw + anim.yawOffset;
 
       const baseCenterX = bufW * 0.5;
-      // Anchor bottom of model cleanly onto the pedestal plane
       const totalStackPx = height * layerStep;
       const baseCenterY = bufH * 0.56 + totalStackPx * 0.30 - anim.floatY;
 
@@ -465,6 +496,8 @@
       const showShading = this.showShading;
       const highlightSlice = this.highlightSlice;
       const t = this.time;
+      const invSquash = 1.0 / squashY;
+      const maxZ = Math.max(1, height - 1);
 
       for (let z = 0; z < maxVisibleZ; z++) {
         const b = layerBounds[z];
@@ -473,7 +506,6 @@
         const slice = layers[z];
         const nextSlice = z + 1 < maxVisibleZ ? layers[z + 1] : null;
 
-        // Per-slice animation deformation
         let sliceYaw = totalYaw;
         let offsetX = 0;
         let offsetY = -z * layerStep;
@@ -481,12 +513,12 @@
         if (anim.swingAngle !== 0) {
           const dist = pivotZ - z;
           if (dist > 0) {
-            offsetX += Math.sin(anim.swingAngle) * dist * 0.78;
-            offsetY -= (1 - Math.cos(anim.swingAngle)) * dist * 0.5;
+            offsetX += Math.sin(anim.swingAngle) * dist * 0.76;
+            offsetY -= (1 - Math.cos(anim.swingAngle)) * dist * 0.48;
           }
         }
         if (anim.waveAmp > 0) {
-          sliceYaw += Math.sin(t * 3.2 - z * 0.14) * 0.055 * anim.waveAmp;
+          sliceYaw += Math.sin(t * 3.2 - z * (6.2 / height)) * 0.05 * anim.waveAmp;
         }
 
         const cosA = Math.cos(sliceYaw);
@@ -494,7 +526,6 @@
         const scx = baseCenterX + offsetX;
         const scy = baseCenterY + offsetY;
 
-        // Project 4 tight bounding box corners to find screen rect
         const u0 = b.minX - halfW - 0.5;
         const u1 = b.maxX - halfW + 1.5;
         const v0 = b.minY - halfD - 0.5;
@@ -519,41 +550,42 @@
         if (minBy < 1) minBy = 1;
         if (maxBy > bufH - 2) maxBy = bufH - 2;
 
-        // Height shading multiplier
-        const heightRatio = height > 1 ? z / (height - 1) : 1;
-        const heightLight = showShading ? 0.85 + heightRatio * 0.22 : 1.0;
-        const invSquash = 1.0 / squashY;
+        const heightRatio = z / maxZ;
+        const heightLight = showShading ? 0.87 + heightRatio * 0.19 : 1.0;
         const isHighlighted = z === highlightSlice;
+        const bMinX = b.minX;
+        const bMaxX = b.maxX;
+        const bMinY = b.minY;
+        const bMaxY = b.maxY;
 
         for (let by = minBy; by <= maxBy; by++) {
           const dy = (by - scy) * invSquash;
           const rowBase = by * bufW;
-          const dySin = dy * sinA;
-          const dyCos = dy * cosA;
+          const dySin = dy * sinA + halfW;
+          const dyCos = dy * cosA + halfD;
+          // Screen-facing depth metric (higher = closer to viewer)
+          const camDepth = (dy * 10 + z * 6) | 0;
 
           for (let bx = minBx; bx <= maxBx; bx++) {
             const dx = bx - scx;
-            const u = Math.floor(dx * cosA + dySin + halfW);
-            if (u < b.minX || u > b.maxX) continue;
-            const v = Math.floor(-dx * sinA + dyCos + halfD);
-            if (v < b.minY || v > b.maxY) continue;
+            const u = (dx * cosA + dySin) | 0;
+            if (u < bMinX || u > bMaxX) continue;
+            const v = (-dx * sinA + dyCos) | 0;
+            if (v < bMinY || v > bMaxY) continue;
 
             const vIdx = v * width + u;
             const cIdx = slice[vIdx];
             if (cIdx === 0) continue;
 
-            const p = pal[cIdx];
-            if (!p) continue;
-
             const bufIdx = rowBase + bx;
-            let r = p.r;
-            let g = p.g;
-            let bl = p.b;
+            let r = palR[cIdx];
+            let g = palG[cIdx];
+            let bl = palB[cIdx];
+            const em = palEm[cIdx];
 
-            if (!p.emissive && showShading) {
-              // Subtle top-surface catch light when exposed above
+            if (!em && showShading) {
               const exposedTop = !nextSlice || nextSlice[vIdx] === 0;
-              const mult = heightLight * (exposedTop ? 1.08 : 0.96);
+              const mult = heightLight * (exposedTop ? 1.07 : 0.97);
               r = clampByte(r * mult);
               g = clampByte(g * mult);
               bl = clampByte(bl * mult);
@@ -567,8 +599,56 @@
 
             u32[bufIdx] = packRgba(r, g, bl, 255);
             zBuf[bufIdx] = z;
-            groupBuf[bufIdx] = p.group;
-            emissiveBuf[bufIdx] = p.emissive ? 1 : 0;
+            groupBuf[bufIdx] = palGrp[cIdx];
+            emissiveBuf[bufIdx] = em;
+            depthBuf[bufIdx] = camDepth;
+          }
+        }
+      }
+
+      // Post-process Pass 0: Screen-Space 3D Directional Cel-Shading & Soft Rim Light!
+      if (showShading) {
+        for (let y = 1; y < bufH - 1; y++) {
+          const row = y * bufW;
+          for (let x = 1; x < bufW - 1; x++) {
+            const idx = row + x;
+            const z = zBuf[idx];
+            if (z < 0 || emissiveBuf[idx]) continue;
+
+            const dC = depthBuf[idx];
+            const dL = zBuf[idx - 1] >= 0 ? depthBuf[idx - 1] : dC - 18;
+            const dR = zBuf[idx + 1] >= 0 ? depthBuf[idx + 1] : dC - 18;
+            const dU = zBuf[idx - bufW] >= 0 ? depthBuf[idx - bufW] : dC - 18;
+            const dD = zBuf[idx + bufW] >= 0 ? depthBuf[idx + bufW] : dC - 18;
+
+            // Approximate 3D surface slope facing top-left key light (-0.65, -0.75)
+            const gx = dR - dL;
+            const gy = dD - dU;
+            const lightDot = (-gx * 0.55 - gy * 0.65) * 0.012;
+
+            // Subtle crisp cel-shading ramp + gentle top-left rim light on silhouette edge
+            let shade = 1.0;
+            if (lightDot > 0.14) shade = 1.09;
+            else if (lightDot > 0.04) shade = 1.03;
+            else if (lightDot < -0.16) shade = 0.86;
+            else if (lightDot < -0.05) shade = 0.93;
+
+            const isTopEdge = zBuf[idx - bufW] < 0 || zBuf[idx - 1] < 0;
+            if (isTopEdge && lightDot >= -0.02) {
+              shade += 0.06; // subtle rim highlight
+            }
+
+            if (shade !== 1.0) {
+              const col = u32[idx];
+              const cr = col & 255;
+              const cg = (col >> 8) & 255;
+              const cb = (col >> 16) & 255;
+              // Slightly warm highlight, slightly cool shadow
+              const nr = clampByte(cr * shade);
+              const ng = clampByte(cg * shade);
+              const nb = clampByte(cb * (shade < 1 ? shade + 0.035 : shade));
+              u32[idx] = packRgba(nr, ng, nb, 255);
+            }
           }
         }
       }
@@ -578,6 +658,9 @@
         const inkR = 24;
         const inkG = 28;
         const inkB = 44;
+        // Scale depth-jump threshold with model height so HD models stay crisp & clean!
+        const zJump = Math.max(3, Math.round(height * 0.075));
+
         for (let y = 1; y < bufH - 1; y++) {
           const row = y * bufW;
           for (let x = 1; x < bufW - 1; x++) {
@@ -586,7 +669,6 @@
             if (z < 0 || emissiveBuf[idx]) continue;
 
             const grp = groupBuf[idx];
-            // Check neighbors for foreground step or distinct foreground material
             const nUp = idx - bufW;
             const nDn = idx + bufW;
             const nLt = idx - 1;
@@ -594,19 +676,22 @@
 
             let edgeStrength = 0;
             if (
-              (zBuf[nUp] >= z + 3) ||
-              (zBuf[nDn] >= z + 3) ||
-              (zBuf[nLt] >= z + 3) ||
-              (zBuf[nRt] >= z + 3)
+              zBuf[nUp] >= z + zJump ||
+              zBuf[nDn] >= z + zJump ||
+              zBuf[nLt] >= z + zJump ||
+              zBuf[nRt] >= z + zJump
             ) {
-              edgeStrength = 0.56;
+              edgeStrength = 0.54;
             } else if (
-              (zBuf[nUp] >= z && groupBuf[nUp] !== grp) ||
-              (zBuf[nDn] >= z && groupBuf[nDn] !== grp) ||
-              (zBuf[nLt] >= z && groupBuf[nLt] !== grp) ||
-              (zBuf[nRt] >= z && groupBuf[nRt] !== grp)
+              // Only outline distinct material groups (keep rich HD image palettes clean!)
+              m.palette.length <= 28 && (
+                (zBuf[nUp] >= z && groupBuf[nUp] !== grp) ||
+                (zBuf[nDn] >= z && groupBuf[nDn] !== grp) ||
+                (zBuf[nLt] >= z && groupBuf[nLt] !== grp) ||
+                (zBuf[nRt] >= z && groupBuf[nRt] !== grp)
+              )
             ) {
-              edgeStrength = 0.42;
+              edgeStrength = 0.38;
             }
 
             if (edgeStrength > 0) {
@@ -628,9 +713,10 @@
 
       // Post-process Pass 2: Crisp 1px Silhouette Pixel Outline
       if (this.showOutline) {
-        const outlineColor = this.bgMode === 'dark'
-          ? packRgba(12, 16, 26, 255)
-          : packRgba(26, 31, 46, 255);
+        const outlineColor =
+          this.bgMode === 'dark'
+            ? packRgba(12, 16, 26, 255)
+            : packRgba(26, 31, 46, 255);
 
         for (let y = 1; y < bufH - 1; y++) {
           const row = y * bufW;
@@ -651,15 +737,24 @@
 
       // Post-process Pass 3: Crisp Pixel Sparkles / Theme Particles
       if (this.showParticles) {
-        this._drawPixelParticles(baseCenterX, baseCenterY, totalStackPx, squashY, m.particleTheme || 'sparkles');
+        const radiusBase = Math.max(width, depth) * 0.72;
+        this._drawPixelParticles(
+          baseCenterX,
+          baseCenterY,
+          totalStackPx,
+          radiusBase,
+          squashY,
+          m.particleTheme || 'sparkles'
+        );
       }
     }
 
-    _drawPixelParticles(cx, baseY, stackPx, squashY, theme) {
+    _drawPixelParticles(cx, baseY, stackPx, radiusBase, squashY, theme) {
       const u32 = this.u32;
       const bufW = this.bufW;
       const bufH = this.bufH;
       const t = this.time;
+      const pScale = radiusBase > 42 ? 2 : 1;
 
       const setPx = (x, y, col) => {
         const ix = x | 0;
@@ -672,7 +767,7 @@
       for (let i = 0; i < this.particles.length; i++) {
         const p = this.particles[i];
         const a = p.angle + t * 0.45 * p.speed;
-        const r = p.radius;
+        const r = p.radiusFrac * radiusBase;
 
         if (theme === 'sakura') {
           const fall = ((t * 0.35 * p.speed + p.phase) % 1 + 1) % 1;
@@ -690,9 +785,14 @@
           const py = baseY - stackPx * (0.1 + rise * 0.95);
           const twinkle = Math.sin(t * 6 + p.phase);
           if (twinkle < -0.25) continue;
-          const col = theme === 'runes'
-            ? (i % 2 === 0 ? packRgba(103, 232, 249, 255) : packRgba(196, 181, 253, 255))
-            : (i % 2 === 0 ? packRgba(103, 232, 249, 255) : packRgba(253, 224, 71, 255));
+          const col =
+            theme === 'runes'
+              ? i % 2 === 0
+                ? packRgba(103, 232, 249, 255)
+                : packRgba(196, 181, 253, 255)
+              : i % 2 === 0
+                ? packRgba(103, 232, 249, 255)
+                : packRgba(253, 224, 71, 255);
           setPx(px, py, col);
           if (twinkle > 0.45) {
             setPx(px - 1, py, col);
@@ -703,32 +803,33 @@
           continue;
         }
 
-        // Default: cute 4-point twinkling pixel sparkles (matching Ryu's tweet!)
         const twinkle = Math.sin(t * 4.2 * p.speed + p.phase);
         if (twinkle < 0.15) continue;
         const px = cx + Math.cos(a) * r;
         const py = baseY - stackPx * p.heightFrac + Math.sin(a) * r * squashY * 0.35;
-        const core = packRgba(255, 252, 220, 255);
+        const core = packRgba(255, 252, 224, 255);
         const ray = packRgba(255, 224, 92, 255);
-        const rim = packRgba(212, 165, 36, 255);
+        const rim = packRgba(218, 168, 36, 255);
 
         setPx(px, py, core);
-        if (twinkle > 0.45) {
-          setPx(px - 1, py, ray);
-          setPx(px + 1, py, ray);
-          setPx(px, py - 1, ray);
-          setPx(px, py + 1, ray);
+        if (twinkle > 0.42) {
+          for (let d = 1; d <= pScale; d++) {
+            setPx(px - d, py, ray);
+            setPx(px + d, py, ray);
+            setPx(px, py - d, ray);
+            setPx(px, py + d, ray);
+          }
         }
-        if (twinkle > 0.78 && p.size >= 2) {
-          setPx(px - 2, py, rim);
-          setPx(px + 2, py, rim);
-          setPx(px, py - 2, rim);
-          setPx(px, py + 2, rim);
+        if (twinkle > 0.74 && p.size >= 2) {
+          const d2 = pScale + 1;
+          setPx(px - d2, py, rim);
+          setPx(px + d2, py, rim);
+          setPx(px, py - d2, rim);
+          setPx(px, py + d2, rim);
         }
       }
     }
 
-    // Export all slices as a horizontal PNG sprite-sheet (standard sprite-stacking format)
     exportSpriteSheetDataURL() {
       const m = this.model;
       if (!m) return null;

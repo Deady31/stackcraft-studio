@@ -12,15 +12,15 @@
     const dr = r1 - r2;
     const dg = g1 - g2;
     const db = b1 - b2;
-    // Perceptual weighted Euclidean distance
     return dr * dr * 0.299 + dg * dg * 0.587 + db * db * 0.114;
   }
 
-  // Extract raw RGBA pixels from an HTMLImageElement, scaled to a clean working canvas
-  function getWorkingPixels(img, maxDim = 256) {
-    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
-    const w = Math.max(8, Math.round((img.naturalWidth || img.width) * scale));
-    const h = Math.max(8, Math.round((img.naturalHeight || img.height) * scale));
+  function getWorkingPixels(img, maxDim = 320) {
+    const natW = img.naturalWidth || img.width;
+    const natH = img.naturalHeight || img.height;
+    const scale = Math.min(1, maxDim / Math.max(natW, natH));
+    const w = Math.max(8, Math.round(natW * scale));
+    const h = Math.max(8, Math.round(natH * scale));
     const c = document.createElement('canvas');
     c.width = w;
     c.height = h;
@@ -29,21 +29,67 @@
     return { w, h, data: ctx.getImageData(0, 0, w, h).data };
   }
 
-  // Detect if image already has meaningful transparency; otherwise flood-fill remove background from borders
+  function floodEraseFromPoint(rgba, mask, w, h, startX, startY, tolSq) {
+    const sx = Math.max(0, Math.min(w - 1, startX | 0));
+    const sy = Math.max(0, Math.min(h - 1, startY | 0));
+    const sIdx = sy * w + sx;
+    if (!mask[sIdx]) return;
+
+    const sr = rgba[sIdx * 4];
+    const sg = rgba[sIdx * 4 + 1];
+    const sb = rgba[sIdx * 4 + 2];
+
+    const visited = new Uint8Array(w * h);
+    const queue = new Int32Array(w * h);
+    let qHead = 0;
+    let qTail = 0;
+
+    visited[sIdx] = 1;
+    mask[sIdx] = 0;
+    queue[qTail++] = sIdx;
+
+    while (qHead < qTail) {
+      const idx = queue[qHead++];
+      const x = idx % w;
+      const y = (idx / w) | 0;
+      const cr = rgba[idx * 4];
+      const cg = rgba[idx * 4 + 1];
+      const cb = rgba[idx * 4 + 2];
+
+      const tryN = (nIdx) => {
+        if (visited[nIdx] || !mask[nIdx]) return;
+        const nr = rgba[nIdx * 4];
+        const ng = rgba[nIdx * 4 + 1];
+        const nb = rgba[nIdx * 4 + 2];
+        if (
+          colorDistSq(nr, ng, nb, sr, sg, sb) <= tolSq ||
+          colorDistSq(nr, ng, nb, cr, cg, cb) <= tolSq * 0.42
+        ) {
+          visited[nIdx] = 1;
+          mask[nIdx] = 0;
+          queue[qTail++] = nIdx;
+        }
+      };
+
+      if (x > 0) tryN(idx - 1);
+      if (x < w - 1) tryN(idx + 1);
+      if (y > 0) tryN(idx - w);
+      if (y < h - 1) tryN(idx + w);
+    }
+  }
+
   function computeForegroundMask(rgba, w, h, removeBg, tolerance) {
     const mask = new Uint8Array(w * h);
     let transparentCount = 0;
 
     for (let i = 0; i < w * h; i++) {
-      const a = rgba[i * 4 + 3];
-      if (a >= 110) {
+      if (rgba[i * 4 + 3] >= 110) {
         mask[i] = 1;
       } else {
         transparentCount++;
       }
     }
 
-    // If image already has transparent background (>8% transparent border pixels), respect existing alpha
     let borderTrans = 0;
     const borderTotal = w * 2 + h * 2;
     for (let x = 0; x < w; x++) {
@@ -59,7 +105,6 @@
       return mask;
     }
 
-    // Sample corner colors to estimate background
     const seeds = [
       0,
       w - 1,
@@ -75,7 +120,6 @@
     let qHead = 0;
     let qTail = 0;
 
-    // Seed from all 4 edges if pixel matches any corner seed color
     const seedColors = seeds.map((idx) => [rgba[idx * 4], rgba[idx * 4 + 1], rgba[idx * 4 + 2]]);
     const matchesSeed = (idx) => {
       const r = rgba[idx * 4];
@@ -105,7 +149,6 @@
       enqueue(y * w + (w - 1));
     }
 
-    // BFS flood fill background removal
     while (qHead < qTail) {
       const idx = queue[qHead++];
       const x = idx % w;
@@ -119,11 +162,7 @@
         const nr = rgba[nIdx * 4];
         const ng = rgba[nIdx * 4 + 1];
         const nb = rgba[nIdx * 4 + 2];
-        // Match either seed palette or smooth local gradient from current bg pixel
-        if (
-          matchesSeed(nIdx) ||
-          colorDistSq(cr, cg, cb, nr, ng, nb) <= tolSq * 0.45
-        ) {
+        if (matchesSeed(nIdx) || colorDistSq(cr, cg, cb, nr, ng, nb) <= tolSq * 0.45) {
           visited[nIdx] = 1;
           mask[nIdx] = 0;
           queue[qTail++] = nIdx;
@@ -139,8 +178,7 @@
     return mask;
   }
 
-  // Crop & downsample foreground to crisp pixel-art grid
-  function downsampleSubject(rgba, mask, w, h, targetSize) {
+  function downsampleSubject(rgba, mask, w, h, targetSize, extraEraseSeeds, tolerance) {
     let minX = w, minY = h, maxX = -1, maxY = -1;
     for (let y = 0; y < h; y++) {
       const row = y * w;
@@ -155,9 +193,21 @@
     }
 
     if (maxX < minX) {
-      // Fallback: keep whole image if mask removed everything
       minX = 0; minY = 0; maxX = w - 1; maxY = h - 1;
       mask.fill(1);
+    }
+
+    // Apply user magic-wand clicks mapped into the cropped subject box!
+    if (extraEraseSeeds && extraEraseSeeds.length > 0) {
+      const tolSq = Math.max(14, tolerance) * Math.max(14, tolerance) * 1.15;
+      const cropW0 = maxX - minX + 1;
+      const cropH0 = maxY - minY + 1;
+      for (let s = 0; s < extraEraseSeeds.length; s++) {
+        const pt = extraEraseSeeds[s];
+        const wx = Math.round(minX + pt.nx * (cropW0 - 1));
+        const wy = Math.round(minY + pt.ny * (cropH0 - 1));
+        floodEraseFromPoint(rgba, mask, w, h, wx, wy, tolSq);
+      }
     }
 
     const cropW = maxX - minX + 1;
@@ -171,7 +221,6 @@
     const outB = new Uint8Array(outW * outH);
     const outMask = new Uint8Array(outW * outH);
 
-    // Area-averaged sampling with majority alpha coverage for crisp edges
     for (let oy = 0; oy < outH; oy++) {
       const sy0 = minY + (oy / outH) * cropH;
       const sy1 = minY + ((oy + 1) / outH) * cropH;
@@ -209,7 +258,7 @@
       }
     }
 
-    // Remove isolated 1-pixel stray dust speckles
+    // Despeckle isolated 1px noise
     const cleaned = new Uint8Array(outMask);
     for (let y = 0; y < outH; y++) {
       for (let x = 0; x < outW; x++) {
@@ -227,105 +276,97 @@
     return { outW, outH, outR, outG, outB, outMask: cleaned };
   }
 
-  // Deterministic K-Means color quantization for vibrant, crisp pixel-art palettes
-  function quantizePalette(outR, outG, outB, outMask, count, maxColors) {
-    const fgPixels = [];
+  // Fast O(N log K) Median-Cut Color Quantization (handles 112x112 & 96+ colors in < 8ms!)
+  function quantizeMedianCut(outR, outG, outB, outMask, count, maxColors) {
+    const fgIndices = [];
     for (let i = 0; i < count; i++) {
-      if (outMask[i]) fgPixels.push(i);
+      if (outMask[i]) fgIndices.push(i);
     }
-    if (fgPixels.length === 0) {
+    if (fgIndices.length === 0) {
       return { palette: [null, { hex: '#38bdf8', group: 1 }], indices: new Uint8Array(count) };
     }
 
-    const K = Math.min(maxColors, Math.max(2, fgPixels.length));
+    const K = Math.min(240, Math.min(maxColors, Math.max(2, fgIndices.length)));
 
-    // Deterministic farthest-point seeding (gives crisp highlight + accent colors!)
-    const centroids = [];
-    const first = fgPixels[Math.floor(fgPixels.length * 0.5)];
-    centroids.push([outR[first], outG[first], outB[first]]);
-
-    while (centroids.length < K) {
-      let bestIdx = fgPixels[0];
-      let bestDist = -1;
-      for (let p = 0; p < fgPixels.length; p++) {
-        const idx = fgPixels[p];
+    function makeBox(items) {
+      let rMin = 255, rMax = 0, gMin = 255, gMax = 0, bMin = 255, bMax = 0;
+      for (let i = 0; i < items.length; i++) {
+        const idx = items[i];
         const r = outR[idx], g = outG[idx], b = outB[idx];
-        let minD = Infinity;
-        for (let c = 0; c < centroids.length; c++) {
-          const d = colorDistSq(r, g, b, centroids[c][0], centroids[c][1], centroids[c][2]);
-          if (d < minD) minD = d;
-        }
-        if (minD > bestDist) {
-          bestDist = minD;
-          bestIdx = idx;
-        }
+        if (r < rMin) rMin = r;
+        if (r > rMax) rMax = r;
+        if (g < gMin) gMin = g;
+        if (g > gMax) gMax = g;
+        if (b < bMin) bMin = b;
+        if (b > bMax) bMax = b;
       }
-      if (bestDist <= 4) break;
-      centroids.push([outR[bestIdx], outG[bestIdx], outB[bestIdx]]);
+      const rSpan = (rMax - rMin) * 1.05;
+      const gSpan = (gMax - gMin) * 1.25;
+      const bSpan = (bMax - bMin) * 0.90;
+      const maxSpan = Math.max(rSpan, gSpan, bSpan);
+      const axis = maxSpan === gSpan ? 1 : maxSpan === rSpan ? 0 : 2;
+      // Score mixes color spread and pixel volume so small eye/highlight accents stay sharp!
+      const score = maxSpan * Math.pow(items.length, 0.35);
+      return { items, axis, maxSpan, score };
     }
 
-    const actualK = centroids.length;
-    const assign = new Uint8Array(fgPixels.length);
+    const boxes = [makeBox(fgIndices)];
 
-    // 7 iterations of K-Means refinement
-    for (let iter = 0; iter < 7; iter++) {
-      const sumR = new Float64Array(actualK);
-      const sumG = new Float64Array(actualK);
-      const sumB = new Float64Array(actualK);
-      const cnt = new Int32Array(actualK);
-
-      for (let p = 0; p < fgPixels.length; p++) {
-        const idx = fgPixels[p];
-        const r = outR[idx], g = outG[idx], b = outB[idx];
-        let bestC = 0;
-        let bestD = Infinity;
-        for (let c = 0; c < actualK; c++) {
-          const d = colorDistSq(r, g, b, centroids[c][0], centroids[c][1], centroids[c][2]);
-          if (d < bestD) {
-            bestD = d;
-            bestC = c;
-          }
-        }
-        assign[p] = bestC;
-        sumR[bestC] += r;
-        sumG[bestC] += g;
-        sumB[bestC] += b;
-        cnt[bestC]++;
-      }
-
-      for (let c = 0; c < actualK; c++) {
-        if (cnt[c] > 0) {
-          centroids[c][0] = sumR[c] / cnt[c];
-          centroids[c][1] = sumG[c] / cnt[c];
-          centroids[c][2] = sumB[c] / cnt[c];
+    while (boxes.length < K) {
+      let bestIdx = -1;
+      let bestScore = -1;
+      for (let i = 0; i < boxes.length; i++) {
+        if (boxes[i].items.length > 1 && boxes[i].maxSpan > 6 && boxes[i].score > bestScore) {
+          bestScore = boxes[i].score;
+          bestIdx = i;
         }
       }
+      if (bestIdx === -1) break;
+
+      const box = boxes.splice(bestIdx, 1)[0];
+      const axis = box.axis;
+      const arr = box.items;
+      arr.sort((a, b) =>
+        axis === 0 ? outR[a] - outR[b] : axis === 1 ? outG[a] - outG[b] : outB[a] - outB[b]
+      );
+      const mid = arr.length >> 1;
+      boxes.push(makeBox(arr.slice(0, mid)));
+      boxes.push(makeBox(arr.slice(mid)));
     }
 
-    // Build StackCraft palette (index 0 = transparent)
     const palette = [null];
-    for (let c = 0; c < actualK; c++) {
-      const r = Math.round(centroids[c][0]);
-      const g = Math.round(centroids[c][1]);
-      const b = Math.round(centroids[c][2]);
-      // Slight saturation boost for lively pixel-art look
-      const avg = (r + g + b) / 3;
-      const boost = 1.08;
+    const indices = new Uint8Array(count);
+
+    for (let b = 0; b < boxes.length; b++) {
+      const items = boxes[b].items;
+      let sR = 0, sG = 0, sB = 0;
+      for (let i = 0; i < items.length; i++) {
+        const idx = items[i];
+        sR += outR[idx];
+        sG += outG[idx];
+        sB += outB[idx];
+      }
+      const r = Math.round(sR / items.length);
+      const g = Math.round(sG / items.length);
+      const bl = Math.round(sB / items.length);
+
+      // Subtle vibrancy lift for crisp pixel-art look
+      const avg = (r + g + bl) / 3;
+      const boost = 1.06;
       const br = Math.max(0, Math.min(255, Math.round(avg + (r - avg) * boost)));
       const bg = Math.max(0, Math.min(255, Math.round(avg + (g - avg) * boost)));
-      const bb = Math.max(0, Math.min(255, Math.round(avg + (b - avg) * boost)));
-      palette.push({ hex: rgbToHex(br, bg, bb), group: c + 1 });
-    }
+      const bb = Math.max(0, Math.min(255, Math.round(avg + (bl - avg) * boost)));
 
-    const indices = new Uint8Array(count);
-    for (let p = 0; p < fgPixels.length; p++) {
-      indices[fgPixels[p]] = assign[p] + 1;
+      const palIdx = b + 1;
+      palette.push({ hex: rgbToHex(br, bg, bb), group: palIdx });
+      for (let i = 0; i < items.length; i++) {
+        indices[items[i]] = palIdx;
+      }
     }
 
     return { palette, indices };
   }
 
-  // Exact 2D Euclidean distance to nearest silhouette edge (powers rounded plushie 3D inflation!)
   function computeDistanceTransform(mask, w, h) {
     const dist = new Float32Array(w * h);
     const INF = 1e6;
@@ -333,7 +374,6 @@
       dist[i] = mask[i] ? INF : 0;
     }
 
-    // Also treat outer image border as edge so cropped sides still round slightly
     for (let x = 0; x < w; x++) {
       if (mask[x]) dist[x] = 1;
       if (mask[(h - 1) * w + x]) dist[(h - 1) * w + x] = 1;
@@ -343,7 +383,6 @@
       if (mask[y * w + (w - 1)]) dist[y * w + (w - 1)] = 1;
     }
 
-    // Two-pass Chamfer 3-4 distance approximation (fast, smooth, exact enough for pixel art!)
     for (let y = 1; y < h - 1; y++) {
       const row = y * w;
       for (let x = 1; x < w - 1; x++) {
@@ -378,43 +417,81 @@
     return { dist, maxD };
   }
 
-  /**
-   * Convert an HTMLImageElement into a full playable StackCraft pseudo-3D Sprite Stack model!
-   * options:
-   *  - name: string
-   *  - resolution: 24..48 (pixel grid size)
-   *  - colors: 6..24 (palette color count)
-   *  - depthScale: 4..20 (3D thickness)
-   *  - mode: 'puffy' | 'relief' | 'bevel' | 'lathe'
-   *  - orientation: 'standing' | 'flat'
-   *  - removeBg: boolean
-   *  - bgTolerance: 10..85
-   */
+  // Compute clean dominant back color per horizontal row (so faces don't repeat on the back of heads!)
+  function computeSmartBackColors(indices, outMask, outW, outH, paletteLen) {
+    const rowBackColor = new Uint8Array(outH);
+    const counts = new Int32Array(paletteLen + 1);
+
+    for (let y = 0; y < outH; y++) {
+      counts.fill(0);
+      // Find row horizontal span
+      let rowMinX = outW, rowMaxX = -1;
+      for (let x = 0; x < outW; x++) {
+        if (outMask[y * outW + x]) {
+          if (x < rowMinX) rowMinX = x;
+          if (x > rowMaxX) rowMaxX = x;
+        }
+      }
+      if (rowMaxX < rowMinX) continue;
+      const span = Math.max(1, rowMaxX - rowMinX);
+
+      // Weight outer border pixels (hair/hood/shoulders/clothes) higher than center facial features!
+      const y0 = Math.max(0, y - 3);
+      const y1 = Math.min(outH - 1, y + 3);
+      for (let sy = y0; sy <= y1; sy++) {
+        const row = sy * outW;
+        for (let sx = rowMinX; sx <= rowMaxX; sx++) {
+          const ci = indices[row + sx];
+          if (!ci) continue;
+          const rel = (sx - rowMinX) / span; // 0..1 across silhouette
+          const edgeWeight = rel < 0.28 || rel > 0.72 ? 4 : 1;
+          counts[ci] += edgeWeight;
+        }
+      }
+
+      let bestC = 0;
+      let bestCnt = 0;
+      for (let c = 1; c < paletteLen; c++) {
+        if (counts[c] > bestCnt) {
+          bestCnt = counts[c];
+          bestC = c;
+        }
+      }
+      rowBackColor[y] = bestC;
+    }
+
+    return rowBackColor;
+  }
+
   function imageToSpriteStack(img, options) {
     const opts = Object.assign(
       {
-        name: 'Mon Perso 3D',
-        resolution: 38,
-        colors: 14,
-        depthScale: 12,
+        name: 'Mon Perso HD',
+        resolution: 76,
+        colors: 36,
+        depthScale: 18,
         mode: 'puffy',
         orientation: 'standing',
         removeBg: true,
         bgTolerance: 36,
+        smartBack: true,
+        extraEraseSeeds: [],
       },
       options || {}
     );
 
-    const { w, h, data } = getWorkingPixels(img, 240);
+    const { w, h, data } = getWorkingPixels(img, 320);
     const rawMask = computeForegroundMask(data, w, h, opts.removeBg, opts.bgTolerance);
     const { outW, outH, outR, outG, outB, outMask } = downsampleSubject(
       data,
       rawMask,
       w,
       h,
-      opts.resolution
+      opts.resolution,
+      opts.extraEraseSeeds,
+      opts.bgTolerance
     );
-    const { palette, indices } = quantizePalette(
+    const { palette, indices } = quantizeMedianCut(
       outR,
       outG,
       outB,
@@ -424,8 +501,9 @@
     );
     const { dist, maxD } = computeDistanceTransform(outMask, outW, outH);
 
-    // Compute per-pixel 3D half-thickness in voxels
-    const maxHalf = Math.max(1.5, opts.depthScale * 0.5);
+    // Scale 3D depth proportionally with resolution so HD models stay nicely plump!
+    const effDepth = Math.max(4, Math.round(opts.depthScale * (opts.resolution / 44)));
+    const maxHalf = Math.max(1.5, effDepth * 0.5);
     const halfThick = new Float32Array(outW * outH);
 
     for (let i = 0; i < outW * outH; i++) {
@@ -434,25 +512,20 @@
       const lum = (outR[i] * 0.299 + outG[i] * 0.587 + outB[i] * 0.114) / 255;
 
       if (opts.mode === 'bevel') {
-        // Chunky acrylic figurine / enamel charm with clean beveled rim
-        const edge = Math.min(1, dist[i] / 2.2);
+        const edge = Math.min(1, dist[i] / Math.max(2.2, opts.resolution * 0.06));
         halfThick[i] = Math.max(1.0, maxHalf * (0.45 + 0.55 * edge));
       } else if (opts.mode === 'relief') {
-        // Rounded plushie + subtle luminance sculpt (bright features pop forward)
         const dome = Math.sqrt(Math.max(0.06, 1 - (1 - dn) * (1 - dn)));
         halfThick[i] = Math.max(1.0, maxHalf * dome * (0.72 + 0.42 * lum));
       } else {
-        // 'puffy' (default): smooth organic plushie / chibi toy inflation!
         const dome = Math.sqrt(Math.max(0.05, 1 - Math.pow(1 - dn, 2.2)));
         halfThick[i] = Math.max(1.0, maxHalf * dome);
       }
     }
 
-    // Build final 3D Sprite Stack Volume!
     let volW, volD, volH, layers;
 
     if (opts.mode === 'lathe') {
-      // 360-degree surface of revolution around center vertical axis
       volW = outW + 2;
       volD = outW + 2;
       volH = outH;
@@ -464,7 +537,6 @@
       for (let z = 0; z < volH; z++) {
         const sy = outH - 1 - z;
         const sl = new Uint8Array(volW * volD);
-        // Find outermost radius on this horizontal row
         let maxR = 0;
         for (let sx = 0; sx < outW; sx++) {
           if (outMask[sy * outW + sx]) {
@@ -480,7 +552,10 @@
               const dx = x - cx;
               const r = Math.hypot(dx, dy);
               if (r <= maxR + 0.35) {
-                const sampleX = Math.max(0, Math.min(outW - 1, Math.round(srcCx + (dx >= 0 ? r : -r))));
+                const sampleX = Math.max(
+                  0,
+                  Math.min(outW - 1, Math.round(srcCx + (dx >= 0 ? r : -r)))
+                );
                 const ci = indices[sy * outW + sampleX] || indices[sy * outW + Math.round(srcCx)];
                 if (ci) sl[row + x] = ci;
               }
@@ -490,17 +565,22 @@
         layers[z] = sl;
       }
     } else if (opts.orientation === 'standing') {
-      // STANDING UPRIGHT: image X -> X, image Y (bottom-up) -> Z (slices!), inflated thickness -> Y (front-back)
       const pad = 2;
       volW = outW + pad * 2;
-      volD = Math.max(12, Math.ceil(opts.depthScale) + 6);
+      volD = Math.max(14, effDepth + 6);
       volH = outH;
       layers = new Array(volH);
       const midY = (volD - 1) * 0.5;
 
+      const rowBackColor = opts.smartBack
+        ? computeSmartBackColors(indices, outMask, outW, outH, palette.length)
+        : null;
+
       for (let z = 0; z < volH; z++) {
-        const sy = outH - 1 - z; // bottom row of image = z=0 (feet on pedestal!)
+        const sy = outH - 1 - z;
         const sl = new Uint8Array(volW * volD);
+        const backCol = rowBackColor ? rowBackColor[sy] : 0;
+
         for (let sx = 0; sx < outW; sx++) {
           const i = sy * outW + sx;
           const ci = indices[i];
@@ -509,17 +589,23 @@
           const y0 = Math.max(0, Math.round(midY - ht));
           const y1 = Math.min(volD - 1, Math.round(midY + ht));
           const vx = sx + pad;
+
+          // Keep front pixels crisp; replace rear interior half with clean dominant back color when smartBack is ON!
+          const backCutoff = Math.round(midY - Math.max(0.5, ht * 0.15));
           for (let vy = y0; vy <= y1; vy++) {
-            sl[vy * volW + vx] = ci;
+            if (opts.smartBack && backCol && vy < backCutoff && dist[i] > 2.2) {
+              sl[vy * volW + vx] = backCol;
+            } else {
+              sl[vy * volW + vx] = ci;
+            }
           }
         }
         layers[z] = sl;
       }
     } else {
-      // FLAT ON PEDESTAL: image X,Y -> slice X,Y, inflated thickness -> Z layers!
       volW = outW + 2;
       volD = outH + 2;
-      volH = Math.max(8, Math.ceil(opts.depthScale) + 4);
+      volH = Math.max(10, effDepth + 4);
       layers = new Array(volH);
       const midZ = (volH - 1) * 0.5;
 
@@ -543,7 +629,7 @@
       }
     }
 
-    // Also render a quick 2D pixel-art preview canvas for the importer modal
+    // Crisp 2D pixel preview canvas
     const previewCanvas = document.createElement('canvas');
     previewCanvas.width = outW;
     previewCanvas.height = outH;
@@ -561,11 +647,14 @@
     }
     pCtx.putImageData(pImg, 0, 0);
 
+    const maxDim = Math.max(volW, volD, volH);
+    const idealZoom = Math.max(2.1, Math.min(6.0, +(255 / Math.max(36, maxDim)).toFixed(1)));
+
     return {
       model: {
         id: 'img-' + Date.now(),
         name: opts.name,
-        subtitle: `${volH} couches · Image → 3D`,
+        subtitle: `${volH} couches HD · Image → 3D`,
         icon: '🖼️',
         width: volW,
         depth: volD,
@@ -574,8 +663,8 @@
         palette,
         defaultAnim: opts.orientation === 'standing' ? 'turntable' : 'hover',
         defaultYaw: -0.35,
-        defaultPitch: opts.orientation === 'standing' ? 18 : 34,
-        defaultZoom: Math.max(3.8, Math.min(6.4, 210 / Math.max(volW, volH))),
+        defaultPitch: opts.orientation === 'standing' ? 16 : 32,
+        defaultZoom: idealZoom,
         pivotZ: volH - 1,
         particleTheme: 'sparkles',
       },

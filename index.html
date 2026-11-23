@@ -112,8 +112,8 @@
             <input type="range" id="rngPitch" min="5" max="75" step="1" value="30" />
           </div>
           <div class="control-row">
-            <label for="rngZoom">Zoom pixel <span class="val" id="valZoom">5.2×</span></label>
-            <input type="range" id="rngZoom" min="2.0" max="10.0" step="0.1" value="5.2" />
+            <label for="rngZoom">Zoom pixel <span class="val" id="valZoom">2.9×</span></label>
+            <input type="range" id="rngZoom" min="1.5" max="10.0" step="0.1" value="2.9" />
           </div>
         </section>
 
@@ -140,8 +140,13 @@
               <span class="switch"></span>
             </label>
             <label class="toggle-row">
-              <span>Ombrage par hauteur</span>
+              <span>Cel-Shading 3D &amp; Rim</span>
               <input type="checkbox" id="chkShading" checked />
+              <span class="switch"></span>
+            </label>
+            <label class="toggle-row">
+              <span>Lissage HD (doux)</span>
+              <input type="checkbox" id="chkSmoothDisplay" />
               <span class="switch"></span>
             </label>
             <label class="toggle-row">
@@ -201,10 +206,23 @@
           </div>
 
           <div class="img3d-preview-row">
-            <canvas id="img3dPreview" width="84" height="84"></canvas>
+            <canvas id="img3dPreview" width="96" height="96" title="Baguette magique : clique sur un reste de fond pour l'effacer !"></canvas>
             <div class="img3d-preview-actions">
-              <button class="btn-mini" id="btnPickAnotherImg">Choisir une image…</button>
-              <span class="img3d-tip">Astuce : tu peux aussi faire <kbd>Ctrl+V</kbd> n'importe où !</span>
+              <div class="inline-actions">
+                <button class="btn-mini" id="btnPickAnotherImg">Changer…</button>
+                <button class="btn-mini" id="btnResetWand" title="Annuler les clics de baguette magique" hidden>Reset fond</button>
+              </div>
+              <span class="img3d-tip">Clique sur un fond blanc sur l'aperçu pour l'effacer · <kbd>Ctrl+V</kbd> coller</span>
+            </div>
+          </div>
+
+          <div class="img3d-group">
+            <div class="mini-label" style="margin-bottom:5px;">Qualité / Détail</div>
+            <div class="chip-grid chip-grid-4" id="img3dQualityList">
+              <button class="chip" data-res="38" data-col="16">Rétro</button>
+              <button class="chip" data-res="60" data-col="28">Fin</button>
+              <button class="chip active" data-res="76" data-col="36">HD</button>
+              <button class="chip" data-res="104" data-col="64">Ultra</button>
             </div>
           </div>
 
@@ -227,19 +245,24 @@
           </div>
 
           <div class="control-row">
-            <label for="rngImgRes">Résolution pixel <span class="val" id="valImgRes">38 px</span></label>
-            <input type="range" id="rngImgRes" min="20" max="48" step="2" value="38" />
+            <label for="rngImgRes">Résolution pixel <span class="val" id="valImgRes">76 px</span></label>
+            <input type="range" id="rngImgRes" min="24" max="112" step="2" value="76" />
           </div>
           <div class="control-row">
-            <label for="rngImgColors">Couleurs palette <span class="val" id="valImgColors">14</span></label>
-            <input type="range" id="rngImgColors" min="5" max="24" step="1" value="14" />
+            <label for="rngImgColors">Couleurs palette <span class="val" id="valImgColors">36</span></label>
+            <input type="range" id="rngImgColors" min="6" max="96" step="2" value="36" />
           </div>
           <div class="control-row">
-            <label for="rngImgDepth">Épaisseur 3D <span class="val" id="valImgDepth">12</span></label>
-            <input type="range" id="rngImgDepth" min="4" max="22" step="1" value="12" />
+            <label for="rngImgDepth">Épaisseur 3D <span class="val" id="valImgDepth">16</span></label>
+            <input type="range" id="rngImgDepth" min="4" max="26" step="1" value="16" />
           </div>
 
           <label class="toggle-row" style="margin:8px 0 6px;">
+            <span>Dos intelligent (sans visage)</span>
+            <input type="checkbox" id="chkImgSmartBack" checked />
+            <span class="switch"></span>
+          </label>
+          <label class="toggle-row" style="margin:6px 0 6px;">
             <span>Détourage auto du fond</span>
             <input type="checkbox" id="chkImgRemoveBg" checked />
             <span class="switch"></span>
@@ -305,7 +328,7 @@
 
         <!-- 2D SLICE CANVAS -->
         <div class="slice-canvas-wrap">
-          <canvas id="sliceCanvas" width="288" height="288"></canvas>
+          <canvas id="sliceCanvas" width="384" height="384"></canvas>
           <div class="slice-coords" id="sliceCoords">X: — · Y: —</div>
         </div>
 
