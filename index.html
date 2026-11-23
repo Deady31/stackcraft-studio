@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StackCraft — Studio Pseudo-3D Sprite Stacking</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- TOP BAR -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">
+          <span class="stack-bar s1"></span>
+          <span class="stack-bar s2"></span>
+          <span class="stack-bar s3"></span>
+        </div>
+        <div class="brand-text">
+          <h1>StackCraft</h1>
+          <span class="badge">PSEUDO-3D SPRITE STACKING</span>
+        </div>
+      </div>
+
+      <div class="topbar-center">
+        <div class="segmented" id="modeTabs" role="tablist">
+          <button class="seg-btn active" data-view="studio" role="tab" aria-selected="true">Studio 3D</button>
+          <button class="seg-btn" data-view="split" role="tab" aria-selected="false">Studio + Éditeur</button>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="btn btn-accent" id="btnImageTo3D" title="Transformer une image en Sprite-Stack 3D (ou glisse-dépose / Ctrl+V)">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3.5" width="15" height="13" rx="2.2" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="8" r="1.4" fill="currentColor"/><path d="M3.5 14l4-4 3 3 2.5-2.5 3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Image → 3D
+        </button>
+        <input type="file" id="fileImportImage" accept="image/*" hidden />
+
+        <button class="btn btn-ghost" id="btnImportJson" title="Importer un projet JSON">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3v9m0 0l-3.5-3.5M10 12l3.5-3.5M4 15.5h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Importer
+        </button>
+        <input type="file" id="fileImportJson" accept=".json" hidden />
+
+        <button class="btn btn-ghost" id="btnExportJson" title="Sauvegarder le modèle en JSON">
+          JSON
+        </button>
+        <button class="btn btn-ghost" id="btnExportSheet" title="Exporter toutes les couches en Sprite-Sheet PNG">
+          Sprite-Sheet PNG
+        </button>
+        <button class="btn btn-primary" id="btnRecordLoop" title="Enregistrer une boucle vidéo WebM">
+          <span class="rec-dot"></span>
+          <span id="recordBtnLabel">Clip WebM</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- MAIN WORKSPACE -->
+    <main class="workspace" id="workspace">
+      <!-- LEFT SIDEBAR: MODELS & SCENE CONTROLS -->
+      <aside class="panel panel-left">
+        <section class="panel-section">
+          <div class="section-header">
+            <h2>Modèles empilés</h2>
+            <button class="btn-mini" id="btnNewBlank" title="Créer un volume vide">+ Nouveau</button>
+          </div>
+          <div class="preset-grid" id="presetList"></div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-header">
+            <h2>Animation</h2>
+            <button class="btn-mini" id="btnPlayPause">Pause</button>
+          </div>
+          <div class="chip-grid" id="animModeList">
+            <button class="chip active" data-anim="pendulum">Pendule</button>
+            <button class="chip" data-anim="turntable">Toupie 360°</button>
+            <button class="chip" data-anim="hover">Lévitation</button>
+            <button class="chip" data-anim="bounce">Rebond</button>
+            <button class="chip" data-anim="manual">Manuel</button>
+          </div>
+
+          <div class="control-row">
+            <label for="rngSpeed">Vitesse <span class="val" id="valSpeed">1.0×</span></label>
+            <input type="range" id="rngSpeed" min="0.1" max="2.5" step="0.1" value="1.0" />
+          </div>
+          <div class="control-row">
+            <label for="rngAmplitude">Amplitude <span class="val" id="valAmplitude">100%</span></label>
+            <input type="range" id="rngAmplitude" min="0" max="1.8" step="0.05" value="1.0" />
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-header">
+            <h2>Empilement &amp; Caméra</h2>
+            <button class="btn-mini" id="btnResetCam">Reset</button>
+          </div>
+
+          <div class="control-row">
+            <label for="rngSpread">Vue éclatée (couches) <span class="val" id="valSpread">1.0×</span></label>
+            <input type="range" id="rngSpread" min="0.6" max="4.0" step="0.05" value="1.0" />
+          </div>
+          <div class="control-row">
+            <label for="rngSliceCut">Coupe verticale <span class="val" id="valSliceCut">100%</span></label>
+            <input type="range" id="rngSliceCut" min="1" max="48" step="1" value="48" />
+          </div>
+          <div class="control-row">
+            <label for="rngPitch">Inclinaison (Pitch) <span class="val" id="valPitch">30°</span></label>
+            <input type="range" id="rngPitch" min="5" max="75" step="1" value="30" />
+          </div>
+          <div class="control-row">
+            <label for="rngZoom">Zoom pixel <span class="val" id="valZoom">5.2×</span></label>
+            <input type="range" id="rngZoom" min="2.0" max="10.0" step="0.1" value="5.2" />
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-header">
+            <h2>Style &amp; Scène</h2>
+          </div>
+
+          <div class="chip-grid chip-grid-3" id="bgModeList">
+            <button class="chip active" data-bg="paper">Grille Claire</button>
+            <button class="chip" data-bg="dark">Studio Noir</button>
+            <button class="chip" data-bg="blueprint">Blueprint</button>
+          </div>
+
+          <div class="toggle-list">
+            <label class="toggle-row">
+              <span>Contour pixel 1px</span>
+              <input type="checkbox" id="chkOutline" checked />
+              <span class="switch"></span>
+            </label>
+            <label class="toggle-row">
+              <span>Lignes de relief interne</span>
+              <input type="checkbox" id="chkCrevice" checked />
+              <span class="switch"></span>
+            </label>
+            <label class="toggle-row">
+              <span>Ombrage par hauteur</span>
+              <input type="checkbox" id="chkShading" checked />
+              <span class="switch"></span>
+            </label>
+            <label class="toggle-row">
+              <span>Socle circulaire &amp; ombre</span>
+              <input type="checkbox" id="chkPedestal" checked />
+              <span class="switch"></span>
+            </label>
+            <label class="toggle-row">
+              <span>Étincelles &amp; particules</span>
+              <input type="checkbox" id="chkParticles" checked />
+              <span class="switch"></span>
+            </label>
+          </div>
+        </section>
+      </aside>
+
+      <!-- CENTER VIEWPORT -->
+      <section class="viewport-wrap">
+        <canvas id="stageCanvas"></canvas>
+
+        <!-- HUD OVERLAYS -->
+        <div class="hud hud-top-left">
+          <div class="pill" id="hudModelName">Requin Peluche</div>
+          <div class="pill pill-mono" id="hudStats">44 couches · 60 FPS</div>
+        </div>
+
+        <div class="hud hud-top-right">
+          <button class="icon-btn" id="btnSnapPng" title="Capturer une image PNG">
+            <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="5" width="14" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="10.5" r="2.7" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 5L8.6 3.2h2.8L12.5 5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="icon-btn" id="btnToggleExplode" title="Basculer la vue éclatée des couches">
+            <svg viewBox="0 0 20 20" fill="none"><path d="M10 3l7 3.5-7 3.5-7-3.5L10 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M3 10.5l7 3.5 7-3.5M3 14.5l7 3.5 7-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <div class="hud hud-bottom-center">
+          <span class="hint">Glisser : pivoter · Molette : zoomer · Déposer une image ou <kbd>Ctrl+V</kbd> → 3D instantané !</span>
+        </div>
+
+        <!-- FULL VIEWPORT DRAG-AND-DROP OVERLAY -->
+        <div class="drop-overlay" id="dropOverlay" aria-hidden="true">
+          <div class="drop-box">
+            <div class="drop-icon">🖼️✨</div>
+            <div class="drop-title">Lâche ton image ici !</div>
+            <div class="drop-sub">Conversion automatique en pixel-art Sprite Stacking 3D</div>
+          </div>
+        </div>
+
+        <!-- FLOATING LIVE IMAGE -> 3D CONFIGURATOR CARD -->
+        <div class="img3d-card" id="img3dCard" hidden>
+          <div class="img3d-head">
+            <div class="img3d-title">
+              <span>🖼️ Image → 3D</span>
+              <span class="img3d-live">LIVE</span>
+            </div>
+            <button class="btn-mini" id="btnCloseImg3d" title="Fermer le panneau">✕</button>
+          </div>
+
+          <div class="img3d-preview-row">
+            <canvas id="img3dPreview" width="84" height="84"></canvas>
+            <div class="img3d-preview-actions">
+              <button class="btn-mini" id="btnPickAnotherImg">Choisir une image…</button>
+              <span class="img3d-tip">Astuce : tu peux aussi faire <kbd>Ctrl+V</kbd> n'importe où !</span>
+            </div>
+          </div>
+
+          <div class="img3d-group">
+            <div class="mini-label" style="margin-bottom:5px;">Style de volume 3D</div>
+            <div class="chip-grid" id="img3dModeList">
+              <button class="chip active" data-mode="puffy">Peluche 3D</button>
+              <button class="chip" data-mode="relief">Relief Lumière</button>
+              <button class="chip" data-mode="bevel">Figurine Épaisse</button>
+              <button class="chip" data-mode="lathe">Révolution 360°</button>
+            </div>
+          </div>
+
+          <div class="img3d-group">
+            <div class="mini-label" style="margin-bottom:5px;">Orientation</div>
+            <div class="chip-grid" id="img3dOrientList">
+              <button class="chip active" data-orient="standing">Debout (Perso)</button>
+              <button class="chip" data-orient="flat">À plat (Badge)</button>
+            </div>
+          </div>
+
+          <div class="control-row">
+            <label for="rngImgRes">Résolution pixel <span class="val" id="valImgRes">38 px</span></label>
+            <input type="range" id="rngImgRes" min="20" max="48" step="2" value="38" />
+          </div>
+          <div class="control-row">
+            <label for="rngImgColors">Couleurs palette <span class="val" id="valImgColors">14</span></label>
+            <input type="range" id="rngImgColors" min="5" max="24" step="1" value="14" />
+          </div>
+          <div class="control-row">
+            <label for="rngImgDepth">Épaisseur 3D <span class="val" id="valImgDepth">12</span></label>
+            <input type="range" id="rngImgDepth" min="4" max="22" step="1" value="12" />
+          </div>
+
+          <label class="toggle-row" style="margin:8px 0 6px;">
+            <span>Détourage auto du fond</span>
+            <input type="checkbox" id="chkImgRemoveBg" checked />
+            <span class="switch"></span>
+          </label>
+          <div class="control-row" id="rowImgBgTol">
+            <label for="rngImgBgTol">Tolérance fond <span class="val" id="valImgBgTol">36</span></label>
+            <input type="range" id="rngImgBgTol" min="8" max="85" step="2" value="36" />
+          </div>
+
+          <div class="img3d-footer">
+            <button class="btn btn-ghost" id="btnImgOpenEditor" style="flex:1;justify-content:center;">Retoucher</button>
+            <button class="btn btn-primary" id="btnImgDone" style="flex:1;justify-content:center;">Valider ✓</button>
+          </div>
+        </div>
+
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      </section>
+
+      <!-- RIGHT PANEL: SLICE PIXEL EDITOR -->
+      <aside class="panel panel-right" id="editorPanel">
+        <section class="panel-section editor-header-sec">
+          <div class="section-header">
+            <h2>Éditeur de Couches 2D</h2>
+            <div class="inline-actions">
+              <button class="btn-mini" id="btnUndo" title="Annuler (Ctrl+Z)">↶</button>
+              <button class="btn-mini" id="btnRedo" title="Rétablir (Ctrl+Y)">↷</button>
+            </div>
+          </div>
+
+          <!-- LAYER NAVIGATION -->
+          <div class="layer-nav">
+            <button class="btn-mini" id="btnLayerDown" title="Couche inférieure (↓)">▼</button>
+            <div class="layer-indicator">
+              <span>Couche Z</span>
+              <strong id="lblCurrentLayer">16 / 44</strong>
+            </div>
+            <button class="btn-mini" id="btnLayerUp" title="Couche supérieure (↑)">▲</button>
+          </div>
+          <input type="range" id="rngEditorLayer" min="0" max="43" step="1" value="16" class="layer-slider" />
+
+          <!-- TOOLS -->
+          <div class="tool-bar" id="editorTools">
+            <button class="tool-btn active" data-tool="brush" title="Pinceau (B)">Pinceau</button>
+            <button class="tool-btn" data-tool="eraser" title="Gomme (X)">Gomme</button>
+            <button class="tool-btn" data-tool="fill" title="Remplir (G)">Pot</button>
+            <button class="tool-btn" data-tool="picker" title="Pipette (I)">Pipette</button>
+          </div>
+
+          <div class="editor-options">
+            <div class="mini-group">
+              <span class="mini-label">Taille</span>
+              <button class="size-btn active" data-size="1">1</button>
+              <button class="size-btn" data-size="2">2</button>
+              <button class="size-btn" data-size="3">3</button>
+            </div>
+            <div class="mini-group">
+              <button class="toggle-chip" id="btnSymX" title="Symétrie horizontale">Sym X</button>
+              <button class="toggle-chip" id="btnSymY" title="Symétrie verticale">Sym Y</button>
+              <button class="toggle-chip active" id="btnOnion" title="Afficher les couches voisines (pelure d'oignon)">Oignon</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2D SLICE CANVAS -->
+        <div class="slice-canvas-wrap">
+          <canvas id="sliceCanvas" width="288" height="288"></canvas>
+          <div class="slice-coords" id="sliceCoords">X: — · Y: —</div>
+        </div>
+
+        <!-- LAYER OPS -->
+        <section class="panel-section">
+          <div class="layer-ops-grid">
+            <button class="btn-mini" id="btnDupUp" title="Copier cette couche sur Z+1">Copier ↑</button>
+            <button class="btn-mini" id="btnDupDown" title="Copier cette couche sur Z-1">Copier ↓</button>
+            <button class="btn-mini" id="btnMirrorSlice" title="Miroir horizontal de cette couche">Miroir X</button>
+            <button class="btn-mini btn-danger" id="btnClearSlice" title="Vider cette couche">Effacer</button>
+          </div>
+        </section>
+
+        <!-- PALETTE -->
+        <section class="panel-section palette-section">
+          <div class="section-header">
+            <h2>Palette</h2>
+            <label class="color-add-btn" title="Ajouter une nouvelle couleur à la palette">
+              + Couleur
+              <input type="color" id="inpNewColor" value="#ff5577" hidden />
+            </label>
+          </div>
+          <div class="palette-grid" id="paletteGrid"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script src="models.js"></script>
+  <script src="importer.js"></script>
+  <script src="engine.js"></script>
+  <script src="editor.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
